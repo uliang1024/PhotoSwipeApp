@@ -4,8 +4,8 @@ import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Ionicons } from "@expo/vector-icons";
 import * as MediaLibrary from "expo-media-library";
-import { useRouter } from "expo-router";
-import React, { useEffect, useState } from "react";
+import { useFocusEffect, useRouter } from "expo-router"; // 1. 引入 useFocusEffect
+import React, { useCallback, useState } from "react"; // 2. 引入 useCallback
 import {
   ActivityIndicator,
   ScrollView,
@@ -14,12 +14,11 @@ import {
   View,
 } from "react-native";
 
-// 定義月份資料型別
 interface MonthStats {
   title: string;
   count: number;
   color: string;
-  monthId: string; // 用於之後篩選照片
+  monthId: string;
 }
 
 export default function OrganizeScreen() {
@@ -33,47 +32,56 @@ export default function OrganizeScreen() {
   });
   const [monthlyData, setMonthlyData] = useState<MonthStats[]>([]);
 
-  useEffect(() => {
-    analyzePhotoLibrary();
-  }, []);
+  // 3. 使用 useFocusEffect 確保每次回到此頁面都會刷新
+  useFocusEffect(
+    useCallback(() => {
+      analyzePhotoLibrary();
+    }, []),
+  );
 
   const analyzePhotoLibrary = async () => {
-    setLoading(true);
+    // 為了使用者體驗，只有第一次載入顯示大菊花(Loading)，後續刷新在背景靜默執行
+    if (monthlyData.length === 0) setLoading(true);
+
     const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status !== "granted") return;
 
-    // 1. 抓取所有照片與影片的基礎資訊
-    // 注意：為了效能，我們分批抓取或只抓取必要欄位
+    // --- 邏輯保持不變 ---
+    const albums = await MediaLibrary.getAlbumsAsync();
+    const organizedAlbum = albums.find((a) => a.title === "已整理");
+
+    let organizedAssetIds = new Set();
+    if (organizedAlbum) {
+      const organizedAssets = await MediaLibrary.getAssetsAsync({
+        album: organizedAlbum.id,
+        first: 10000,
+      });
+      organizedAssetIds = new Set(organizedAssets.assets.map((a) => a.id));
+    }
+
     const allAssets = await MediaLibrary.getAssetsAsync({
       mediaType: ["photo", "video"],
-      first: 10000, // 假設使用者照片在一萬張以內，若更多需做分頁
+      first: 10000,
     });
+
+    const unorganizedAssets = allAssets.assets.filter(
+      (asset) => !organizedAssetIds.has(asset.id),
+    );
 
     const monthsMap: { [key: string]: number } = {};
     let videoCount = 0;
-
-    // 取得本週的時間範圍
     const now = new Date();
     const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
     let weeklyCount = 0;
 
-    allAssets.assets.forEach((asset) => {
-      // 統計影片
+    unorganizedAssets.forEach((asset) => {
       if (asset.mediaType === "video") videoCount++;
-
-      // 統計本週
       if (asset.creationTime > oneWeekAgo) weeklyCount++;
-
-      // 月份分組邏輯
       const date = new Date(asset.creationTime);
-      const year = date.getFullYear();
-      const month = date.getMonth() + 1;
-      const key = `${year}年 ${month}月`;
-
+      const key = `${date.getFullYear()}年 ${date.getMonth() + 1}月`;
       monthsMap[key] = (monthsMap[key] || 0) + 1;
     });
 
-    // 2. 格式化月份資料並排序
     const colors = [
       "#A1CEDC",
       "#9ED5B2",
@@ -86,19 +94,16 @@ export default function OrganizeScreen() {
       .map((key, index) => ({
         title: key,
         count: monthsMap[key],
-        color: colors[index % colors.length], // 循環使用顏色
+        color: colors[index % colors.length],
         monthId: key,
       }))
-      .sort((a, b) => {
-        // 簡單的降序排列（新的月份在前）
-        return b.title.localeCompare(a.title);
-      });
+      .sort((a, b) => b.title.localeCompare(a.title));
 
     setStats({
       weekly: weeklyCount,
       video: videoCount,
-      screenshot: 0, // 截圖統計需要 Smart Album 權限，暫設 0
-      unorganized: allAssets.totalCount,
+      screenshot: 0,
+      unorganized: unorganizedAssets.length,
     });
     setMonthlyData(formattedMonths);
     setLoading(false);

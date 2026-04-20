@@ -190,6 +190,47 @@ export default function SwipeScreen() {
   useEffect(() => {
     loadCategoryPhotos();
   }, [title]);
+  // 在 SwipeScreen 組件內新增「保留」邏輯
+  const handleKeepPhoto = async (assetId: string) => {
+    try {
+      // 1. 檢查/取得「已整理」相簿
+      let albums = await MediaLibrary.getAlbumsAsync();
+      let organizedAlbum = albums.find((a) => a.title === "已整理");
+
+      if (!organizedAlbum) {
+        // 如果不存在就建立
+        organizedAlbum = await MediaLibrary.createAlbumAsync("已整理");
+        // 注意：建立相簿時通常需要放入一張照片，這裡實作時要注意權限
+      }
+
+      // 2. 將照片加入相簿
+      // iOS/Android 邏輯：addAssetsToAlbumAsync
+      await MediaLibrary.addAssetsToAlbumAsync(
+        [assetId],
+        organizedAlbum.id,
+        false,
+      );
+
+      // 3. 觸發觸覺反饋
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+
+      // 4. 從當前視圖移除這張照片 (跟刪除邏輯一樣，但不進入垃圾桶)
+      // 從視圖移除
+      setPhotos((prev) => {
+        const newPhotos = prev.filter((p) => p.id !== assetId);
+        // 如果刪掉的是最後一張，把索引往前推
+        if (currentIndex >= newPhotos.length && currentIndex > 0) {
+          setCurrentIndex(newPhotos.length - 1);
+        }
+        return newPhotos;
+      });
+
+      console.log("照片已歸類至「已整理」相簿");
+    } catch (error) {
+      console.error("歸類失敗:", error);
+      Alert.alert("歸類失敗", "無法將照片移入相簿");
+    }
+  };
   // 跳轉至特定照片
   const handleJumpToPhoto = (index: number) => {
     setCurrentIndex(index);
@@ -199,55 +240,52 @@ export default function SwipeScreen() {
   const loadCategoryPhotos = async () => {
     setLoading(true);
 
-    // 1. 先抓一次取得 totalCount
+    // 1. 取得手機內所有照片
     const initialFetch = await MediaLibrary.getAssetsAsync({
       mediaType: ["photo", "video"],
     });
-
-    // 2. 根據總數一次抓完 (或者分批抓，這裡為了邏輯簡單先設定一個較大的值)
-    // 注意：雖然首頁顯示 286 張，但 getAssetsAsync 預設可能只回傳一部分
     const { assets: allAssets } = await MediaLibrary.getAssetsAsync({
-      first: initialFetch.totalCount, // 抓取手機內「所有」照片來進行過濾
+      first: initialFetch.totalCount,
       mediaType: ["photo", "video"],
       sortBy: ["creationTime"],
     });
 
-    // 3. 取得「已整理」相簿內容 (用於排除邏輯)
+    // 2. 取得「已整理」相簿內容
     const albums = await MediaLibrary.getAlbumsAsync();
     const organizedAlbum = albums.find((a) => a.title === "已整理");
-
     let organizedIds = new Set();
     if (organizedAlbum) {
       const organizedAssets = await MediaLibrary.getAssetsAsync({
         album: organizedAlbum.id,
-        first: organizedAlbum.assetCount,
+        first: 10000, // 假設已整理相簿不超過一萬張
       });
       organizedIds = new Set(organizedAssets.assets.map((a) => a.id));
     }
 
-    // 4. 執行過濾
+    // 3. 執行過濾
     const filtered = allAssets.filter((asset) => {
+      // 【核心修正】：不論什麼類型，只要在「已整理」相簿裡就直接排除
+      const isUnorganized = !organizedIds.has(asset.id);
+      if (!isUnorganized) return false;
+
       const date = new Date(asset.creationTime);
       const now = new Date();
-
-      // 基本排除：如果是「未整理」系列，就要排除已在相簿裡的
-      const isUnorganized = !organizedIds.has(asset.id);
 
       switch (type) {
         case "weekly": {
           const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-          return asset.creationTime > oneWeekAgo && isUnorganized;
+          return asset.creationTime > oneWeekAgo;
         }
         case "month": {
           const monthStr = `${date.getFullYear()}年 ${date.getMonth() + 1}月`;
-          // 這裡要嚴格對齊首頁的字串格式
+          // 【核心修正】：月份篩選現在也會正確排除已整理的照片了
           return monthStr === title;
         }
         case "unorganized_video": {
-          return asset.mediaType === "video" && isUnorganized;
+          return asset.mediaType === "video";
         }
         case "unorganized": {
-          return isUnorganized;
+          return true;
         }
         default:
           return true;
@@ -408,7 +446,13 @@ export default function SwipeScreen() {
             <ThemedText style={styles.actionLabelHorizontal}>幫助</ThemedText>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.actionItemHorizontal}>
+          <TouchableOpacity
+            style={styles.actionItemHorizontal}
+            onPress={() => {
+              if (photos[currentIndex])
+                handleKeepPhoto(photos[currentIndex].id);
+            }}
+          >
             <Ionicons name="download-outline" size={20} color="#fff" />
             <ThemedText style={styles.actionLabelHorizontal}>保留</ThemedText>
           </TouchableOpacity>
