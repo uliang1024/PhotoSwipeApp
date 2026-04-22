@@ -1,18 +1,12 @@
 import { CategoryItem } from "@/components/CategoryItem";
-import { FloatingTabBar } from "@/components/FloatingTabBar";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
 import { Ionicons } from "@expo/vector-icons";
+import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library";
 import { useFocusEffect, useRouter } from "expo-router"; // 1. 引入 useFocusEffect
 import React, { useCallback, useState } from "react"; // 2. 引入 useCallback
-import {
-  ActivityIndicator,
-  ScrollView,
-  StyleSheet,
-  TouchableOpacity,
-  View,
-} from "react-native";
+import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
 
 interface MonthStats {
   title: string;
@@ -24,15 +18,18 @@ interface MonthStats {
 export default function OrganizeScreen() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<"unclassified" | "albums">(
+    "unclassified",
+  ); // Tab 狀態
   const [stats, setStats] = useState({
     weekly: 0,
     video: 0,
     screenshot: 0,
     unorganized: 0,
+    weeklyFirstPhoto: null as string | null,
   });
   const [monthlyData, setMonthlyData] = useState<MonthStats[]>([]);
-
-  // 3. 使用 useFocusEffect 確保每次回到此頁面都會刷新
+  const [allAlbums, setAllAlbums] = useState<MediaLibrary.Album[]>([]); // 儲存所有相簿
   useFocusEffect(
     useCallback(() => {
       analyzePhotoLibrary();
@@ -40,30 +37,38 @@ export default function OrganizeScreen() {
   );
 
   const analyzePhotoLibrary = async () => {
-    // 為了使用者體驗，只有第一次載入顯示大菊花(Loading)，後續刷新在背景靜默執行
     if (monthlyData.length === 0) setLoading(true);
-
     const { status } = await MediaLibrary.requestPermissionsAsync();
     if (status !== "granted") return;
 
-    // --- 邏輯保持不變 ---
-    const albums = await MediaLibrary.getAlbumsAsync();
-    const organizedAlbum = albums.find((a) => a.title === "已整理");
+    // 1. 取得所有相簿
+    const albums = await MediaLibrary.getAlbumsAsync({
+      includeSmartAlbums: true,
+    });
+    const filteredAlbums = albums.filter((a) => a.title !== "已整理");
+    setAllAlbums(filteredAlbums.sort((a, b) => b.assetCount - a.assetCount));
 
+    // 2. 找出「已整理」相簿並抓取 *所有* ID (包括照片和影片)
+    const organizedAlbum = albums.find((a) => a.title === "已整理");
     let organizedAssetIds = new Set();
+
     if (organizedAlbum) {
       const organizedAssets = await MediaLibrary.getAssetsAsync({
         album: organizedAlbum.id,
-        first: 10000,
+        first: 20000,
+        mediaType: ["photo", "video"], // 【核心修正 1】：確保抓取已整理相簿時，也包含影片 ID
       });
       organizedAssetIds = new Set(organizedAssets.assets.map((a) => a.id));
     }
 
+    // 抓取所有內容時也要確保包含兩者
     const allAssets = await MediaLibrary.getAssetsAsync({
       mediaType: ["photo", "video"],
       first: 10000,
+      sortBy: ["creationTime"],
     });
 
+    // 【核心修正 2】：產生過濾清單
     const unorganizedAssets = allAssets.assets.filter(
       (asset) => !organizedAssetIds.has(asset.id),
     );
@@ -73,15 +78,30 @@ export default function OrganizeScreen() {
     const now = new Date();
     const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
     let weeklyCount = 0;
+    let weeklyPhoto: string | null = null;
 
-    unorganizedAssets.forEach((asset) => {
-      if (asset.mediaType === "video") videoCount++;
-      if (asset.creationTime > oneWeekAgo) weeklyCount++;
+    // 使用已經排除掉「已整理」的清單來進行統計
+    [...unorganizedAssets].reverse().forEach((asset) => {
+      // 統計未整理的影片 (現在這裡會正確排除已整理的影片了)
+      if (asset.mediaType === "video") {
+        videoCount++;
+      }
+
+      // 統計本週
+      if (asset.creationTime > oneWeekAgo) {
+        weeklyCount++;
+        if (!weeklyPhoto && asset.mediaType === "photo") {
+          weeklyPhoto = asset.uri;
+        }
+      }
+
+      // 統計月份
       const date = new Date(asset.creationTime);
       const key = `${date.getFullYear()}年 ${date.getMonth() + 1}月`;
       monthsMap[key] = (monthsMap[key] || 0) + 1;
     });
 
+    // ... 後續設定 State 的邏輯保持不變 ...
     const colors = [
       "#A1CEDC",
       "#9ED5B2",
@@ -101,21 +121,14 @@ export default function OrganizeScreen() {
 
     setStats({
       weekly: weeklyCount,
-      video: videoCount,
+      video: videoCount, // 這是修正後的正確數字
       screenshot: 0,
       unorganized: unorganizedAssets.length,
+      weeklyFirstPhoto: weeklyPhoto,
     });
     setMonthlyData(formattedMonths);
     setLoading(false);
   };
-
-  if (loading) {
-    return (
-      <ThemedView style={styles.center}>
-        <ActivityIndicator size="large" color="#fff" />
-      </ThemedView>
-    );
-  }
 
   return (
     <ThemedView style={styles.container}>
@@ -123,6 +136,7 @@ export default function OrganizeScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
+        {/* Header */}
         <View style={styles.header}>
           <ThemedText type="title" style={styles.headerTitle}>
             整理
@@ -134,91 +148,210 @@ export default function OrganizeScreen() {
             <Ionicons name="refresh-circle-outline" size={28} color="#fff" />
           </TouchableOpacity>
         </View>
-        {/* ... 中間的 TopTabs, RecentGrid 保持不變 ... */}
+
+        {/* Tab Switcher */}
         <View style={styles.topTabs}>
-          <TouchableOpacity style={styles.topTabActive}>
-            <ThemedText style={styles.topTabTextActive}>未分類</ThemedText>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.topTabInactive}>
-            <ThemedText style={styles.topTabTextInactive}>相冊</ThemedText>
-          </TouchableOpacity>
-        </View>
-        <ThemedText style={styles.sectionTitle}>最近</ThemedText>
-        <View style={styles.recentGrid}>
-          <View style={[styles.recentCard, { backgroundColor: "#3A3A3C" }]}>
-            <ThemedText style={styles.recentCardText}>這一天</ThemedText>
-          </View>
-          <View style={[styles.recentCard, { backgroundColor: "#3A3A3C" }]}>
-            <ThemedText style={styles.recentCardText}>去年</ThemedText>
-          </View>
-        </View>
-        <TouchableOpacity
-          style={styles.weeklyBanner}
-          onPress={() => {
-            router.push({
-              pathname: "/swipe",
-              params: { title: `本週 (${stats.weekly})`, type: "weekly" },
-            });
-          }}
-        >
-          <ThemedText style={styles.bannerText}>
-            本週 ({stats.weekly} 張)
-          </ThemedText>
-        </TouchableOpacity>
-        <View style={styles.listContainer}>
-          <CategoryItem
-            title="所有未整理"
-            count={stats.unorganized}
-            color="#3A3A3C"
-            onPress={() =>
-              router.push({
-                pathname: "/swipe",
-                params: { title: "所有未整理", type: "unorganized" },
-              })
+          <TouchableOpacity
+            style={
+              activeTab === "unclassified"
+                ? styles.topTabActive
+                : styles.topTabInactive
             }
-          />
-          <CategoryItem
-            title="未整理的影片"
-            count={stats.video}
-            color="#3A3A3C"
-            onPress={() =>
-              router.push({
-                pathname: "/swipe",
-                params: { title: "未整理的影片", type: "unorganized_video" },
-              })
+            onPress={() => setActiveTab("unclassified")}
+          >
+            <ThemedText
+              style={
+                activeTab === "unclassified"
+                  ? styles.topTabTextActive
+                  : styles.topTabTextInactive
+              }
+            >
+              未分類
+            </ThemedText>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={
+              activeTab === "albums"
+                ? styles.topTabActive
+                : styles.topTabInactive
             }
-          />
+            onPress={() => setActiveTab("albums")}
+          >
+            <ThemedText
+              style={
+                activeTab === "albums"
+                  ? styles.topTabTextActive
+                  : styles.topTabTextInactive
+              }
+            >
+              相冊
+            </ThemedText>
+          </TouchableOpacity>
         </View>
-        <View style={styles.monthlyContainer}>
-          <ThemedText style={[styles.sectionTitle, { marginTop: 10 }]}>
-            按月份
-          </ThemedText>
-          {monthlyData.map((item, index) => (
-            <CategoryItem
-              key={index}
-              title={item.title}
-              count={item.count}
-              color={item.color}
-              onPress={() => {
+
+        {activeTab === "unclassified" ? (
+          /* 未分類內容 */
+          <>
+            <ThemedText style={styles.sectionTitle}>最近</ThemedText>
+            <TouchableOpacity
+              style={styles.weeklyBanner}
+              activeOpacity={0.9}
+              onPress={() =>
                 router.push({
                   pathname: "/swipe",
-                  params: { title: item.title, type: "month" }, // 明確帶入 type: month
-                });
-              }}
-            />
-          ))}
-        </View>
+                  params: { title: `本週`, type: "weekly" },
+                })
+              }
+            >
+              {stats.weeklyFirstPhoto ? (
+                <Image
+                  source={{ uri: stats.weeklyFirstPhoto }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                />
+              ) : (
+                <View
+                  style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: "#2C2C2E" },
+                  ]}
+                />
+              )}
+              <View style={styles.bannerOverlay}>
+                <ThemedText style={styles.bannerText}>
+                  本週 ({stats.weekly} 張)
+                </ThemedText>
+              </View>
+            </TouchableOpacity>
+
+            <View style={styles.listContainer}>
+              <CategoryItem
+                title="所有未整理"
+                count={stats.unorganized}
+                color="#3A3A3C"
+                isSmall
+                onPress={() =>
+                  router.push({
+                    pathname: "/swipe",
+                    params: { title: "所有未整理", type: "unorganized" },
+                  })
+                }
+              />
+              <CategoryItem
+                title="未整理的影片"
+                count={stats.video}
+                color="#3A3A3C"
+                isSmall
+                onPress={() =>
+                  router.push({
+                    pathname: "/swipe",
+                    params: {
+                      title: "未整理的影片",
+                      type: "unorganized_video",
+                    },
+                  })
+                }
+              />
+            </View>
+
+            <View style={styles.monthlyContainer}>
+              <ThemedText style={[styles.sectionTitle, { marginTop: 10 }]}>
+                按月份
+              </ThemedText>
+              {monthlyData.map((item, index) => (
+                <CategoryItem
+                  key={index}
+                  title={item.title}
+                  count={item.count}
+                  color={item.color}
+                  isSmall
+                  onPress={() =>
+                    router.push({
+                      pathname: "/swipe",
+                      params: { title: item.title, type: "month" },
+                    })
+                  }
+                />
+              ))}
+            </View>
+          </>
+        ) : (
+          /* 相冊內容 (如圖顯示) */
+          <View style={styles.listContainer}>
+            {allAlbums.map((album) => (
+              <CategoryItem
+                key={album.id}
+                title={album.title}
+                count={album.assetCount}
+                color="#2C2C2E"
+                isSmall
+                onPress={() => {
+                  // 跳轉至滑動頁面，並帶入相簿 ID
+                  router.push({
+                    pathname: "/swipe",
+                    params: {
+                      title: album.title,
+                      type: "album", // 新增一個 album 類型
+                      albumId: album.id, // 傳入相簿 ID
+                    },
+                  });
+                }}
+              />
+            ))}
+          </View>
+        )}
         <View style={{ height: 120 }} />
       </ScrollView>
-
-      <FloatingTabBar />
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  // ... 延用你原本的 styles ...
-  container: { flex: 1, backgroundColor: "#000" },
+  container: {
+    flex: 1,
+    backgroundColor: "#000",
+  },
+  containerSmall: {
+    paddingVertical: 10, // 變矮
+    borderRadius: 10,
+    marginBottom: 4, // 變窄
+  },
+  leftContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  colorDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 12,
+  },
+  dotSmall: {
+    width: 6,
+    height: 6,
+    marginRight: 10,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: "500",
+    color: "#fff",
+  },
+  titleSmall: {
+    fontSize: 14, // 字變小
+  },
+  rightContent: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  count: {
+    fontSize: 16,
+    color: "#8E8E93",
+    marginRight: 8,
+  },
+  countSmall: {
+    fontSize: 14, // 數字變小
+    marginRight: 6,
+  },
   center: {
     flex: 1,
     justifyContent: "center",
@@ -256,6 +389,25 @@ const styles = StyleSheet.create({
     color: "#fff",
     marginBottom: 15,
   },
+  weeklyBanner: {
+    height: 200,
+    borderRadius: 20,
+    overflow: "hidden", // 確保圖片不超出圓角
+    marginBottom: 20,
+    backgroundColor: "#1C1C1E",
+  },
+  bannerOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: "rgba(0,0,0,0.3)", // 圖片遮罩
+    justifyContent: "flex-end",
+    padding: 20,
+  },
+  bannerText: { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  listContainer: {
+    width: "100%",
+    marginBottom: 10,
+  },
+  monthlyContainer: { marginTop: 10 },
   recentGrid: { flexDirection: "row", gap: 15, marginBottom: 15 },
   recentCard: {
     flex: 1,
@@ -265,15 +417,4 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   recentCardText: { color: "#fff", fontWeight: "600" },
-  weeklyBanner: {
-    backgroundColor: "#2C2C2E",
-    height: 200,
-    borderRadius: 20,
-    justifyContent: "flex-end",
-    padding: 20,
-    marginBottom: 20,
-  },
-  bannerText: { color: "#fff", fontSize: 20, fontWeight: "bold" },
-  listContainer: { marginBottom: 10 },
-  monthlyContainer: { marginTop: 10 },
 });

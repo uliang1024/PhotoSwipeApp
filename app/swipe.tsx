@@ -144,7 +144,7 @@ const SwipeableCard = ({
 // --- 主螢幕 ---
 export default function SwipeScreen() {
   const router = useRouter();
-  const { title, type } = useLocalSearchParams(); // 接收 type 參數
+  const { title, type, albumId } = useLocalSearchParams(); // 接收 albumId
   const [photos, setPhotos] = useState<MediaLibrary.Asset[]>([]);
   const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]); // 待刪除暫存區
   const [loading, setLoading] = useState(true);
@@ -193,42 +193,33 @@ export default function SwipeScreen() {
   // 在 SwipeScreen 組件內新增「保留」邏輯
   const handleKeepPhoto = async (assetId: string) => {
     try {
-      // 1. 檢查/取得「已整理」相簿
       let albums = await MediaLibrary.getAlbumsAsync();
       let organizedAlbum = albums.find((a) => a.title === "已整理");
 
       if (!organizedAlbum) {
-        // 如果不存在就建立
         organizedAlbum = await MediaLibrary.createAlbumAsync("已整理");
-        // 注意：建立相簿時通常需要放入一張照片，這裡實作時要注意權限
       }
 
-      // 2. 將照片加入相簿
-      // iOS/Android 邏輯：addAssetsToAlbumAsync
+      // 將資產加入相簿
       await MediaLibrary.addAssetsToAlbumAsync(
         [assetId],
         organizedAlbum.id,
         false,
       );
-
-      // 3. 觸發觸覺反饋
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
-      // 4. 從當前視圖移除這張照片 (跟刪除邏輯一樣，但不進入垃圾桶)
-      // 從視圖移除
+      // 【關鍵】：立即從當前的 photos 狀態中移除
+      // 這樣在 Swipe 頁面它會立刻消失
       setPhotos((prev) => {
         const newPhotos = prev.filter((p) => p.id !== assetId);
-        // 如果刪掉的是最後一張，把索引往前推
         if (currentIndex >= newPhotos.length && currentIndex > 0) {
           setCurrentIndex(newPhotos.length - 1);
         }
         return newPhotos;
       });
-
-      console.log("照片已歸類至「已整理」相簿");
     } catch (error) {
       console.error("歸類失敗:", error);
-      Alert.alert("歸類失敗", "無法將照片移入相簿");
+      Alert.alert("歸類失敗", "無法將照片/影片移入相簿");
     }
   };
   // 跳轉至特定照片
@@ -239,61 +230,65 @@ export default function SwipeScreen() {
   };
   const loadCategoryPhotos = async () => {
     setLoading(true);
+    try {
+      // 1. 先取得「已整理」相簿並抓取 *所有* (照片+影片) 的 ID
+      const albums = await MediaLibrary.getAlbumsAsync();
+      const organizedAlbum = albums.find((a) => a.title === "已整理");
+      let organizedIds = new Set();
 
-    // 1. 取得手機內所有照片
-    const initialFetch = await MediaLibrary.getAssetsAsync({
-      mediaType: ["photo", "video"],
-    });
-    const { assets: allAssets } = await MediaLibrary.getAssetsAsync({
-      first: initialFetch.totalCount,
-      mediaType: ["photo", "video"],
-      sortBy: ["creationTime"],
-    });
-
-    // 2. 取得「已整理」相簿內容
-    const albums = await MediaLibrary.getAlbumsAsync();
-    const organizedAlbum = albums.find((a) => a.title === "已整理");
-    let organizedIds = new Set();
-    if (organizedAlbum) {
-      const organizedAssets = await MediaLibrary.getAssetsAsync({
-        album: organizedAlbum.id,
-        first: 10000, // 假設已整理相簿不超過一萬張
-      });
-      organizedIds = new Set(organizedAssets.assets.map((a) => a.id));
-    }
-
-    // 3. 執行過濾
-    const filtered = allAssets.filter((asset) => {
-      // 【核心修正】：不論什麼類型，只要在「已整理」相簿裡就直接排除
-      const isUnorganized = !organizedIds.has(asset.id);
-      if (!isUnorganized) return false;
-
-      const date = new Date(asset.creationTime);
-      const now = new Date();
-
-      switch (type) {
-        case "weekly": {
-          const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-          return asset.creationTime > oneWeekAgo;
-        }
-        case "month": {
-          const monthStr = `${date.getFullYear()}年 ${date.getMonth() + 1}月`;
-          // 【核心修正】：月份篩選現在也會正確排除已整理的照片了
-          return monthStr === title;
-        }
-        case "unorganized_video": {
-          return asset.mediaType === "video";
-        }
-        case "unorganized": {
-          return true;
-        }
-        default:
-          return true;
+      if (organizedAlbum) {
+        const organizedAssets = await MediaLibrary.getAssetsAsync({
+          album: organizedAlbum.id,
+          first: 20000,
+          mediaType: ["photo", "video"], // 【關鍵 1】確保這裡有抓到已整理的影片 ID
+        });
+        organizedIds = new Set(organizedAssets.assets.map((a) => a.id));
       }
-    });
 
-    setPhotos(filtered);
-    setLoading(false);
+      // 2. 根據模式抓取目標照片/影片
+      const fetchOptions: MediaLibrary.AssetsOptions = {
+        mediaType: ["photo", "video"], // 【關鍵 2】全域確保包含影片
+        sortBy: ["creationTime"],
+        ...(type === "album" && albumId
+          ? { album: albumId as string }
+          : { first: 10000 }),
+      };
+
+      const { assets: allAssets } =
+        await MediaLibrary.getAssetsAsync(fetchOptions);
+
+      // 3. 嚴格過濾
+      const filtered = allAssets.filter((asset) => {
+        // 檢查是否已在「已整理」中
+        const isAlreadyOrganized = organizedIds.has(asset.id);
+        if (isAlreadyOrganized) return false;
+
+        const date = new Date(asset.creationTime);
+        const now = new Date();
+
+        switch (type) {
+          case "album":
+            return true;
+          case "weekly":
+            const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+            return asset.creationTime > oneWeekAgo;
+          case "month":
+            return `${date.getFullYear()}年 ${date.getMonth() + 1}月` === title;
+          case "unorganized_video":
+            return asset.mediaType === "video";
+          case "unorganized":
+            return true;
+          default:
+            return true;
+        }
+      });
+
+      setPhotos(filtered);
+    } catch (error) {
+      console.error("載入失敗:", error);
+    } finally {
+      setLoading(false);
+    }
   };
 
   // 核心：當照片飛走後，從主列表移除並存入待刪清單
