@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "PhotoSwipeApp",
-    "slug": "PhotoSwipeApp",
+    "slug": "photoswipeapp",
     "privacy": "public", 
     "version": "1.0.0",
     "orientation": "portrait",
