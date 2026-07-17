@@ -3,7 +3,7 @@ name: Continuous Deployment
 on:
   push:
     branches:
-      - main # 當你 push 到 main 分支時觸發
+      - colleague-test # 當你 push 到 main 分支時觸發
 
 jobs:
   update:
