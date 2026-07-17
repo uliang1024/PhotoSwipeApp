@@ -11,7 +11,7 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.uliang0230.PhotoSwipeApp",
+      "bundleIdentifier": "com.uliang0230.photoswipeapp",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
