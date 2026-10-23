@@ -6,7 +6,15 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library";
-import { useLocalSearchParams, useRouter } from "expo-router";
+import { usePreventRemove } from "@react-navigation/native";
+import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+import {
+  addToOrganizedAlbum,
+  fetchAllAssets,
+  getOrganizedAssetIds,
+  isWithinLastWeek,
+  monthKey,
+} from "@/lib/media";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -20,11 +28,7 @@ import {
 } from "react-native";
 
 // 動畫與手勢庫
-import {
-  Gesture,
-  GestureDetector,
-  GestureHandlerRootView,
-} from "react-native-gesture-handler";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import Animated, {
   Extrapolation,
   interpolate,
@@ -34,11 +38,12 @@ import Animated, {
   withSpring,
   withTiming,
 } from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
-const TOP_HEIGHT = 120;
-const BOTTOM_HEIGHT = 100;
-const MIDDLE_HEIGHT = SCREEN_HEIGHT - TOP_HEIGHT - BOTTOM_HEIGHT;
+// 不含安全區域的內容高度，實際高度會再加上 insets
+const TOP_BAR_HEIGHT = 60;
+const BOTTOM_BAR_HEIGHT = 70;
 const VideoCard = ({ uri, isActive }: { uri: string; isActive: boolean }) => {
   const player = useVideoPlayer(uri, (player) => {
     player.loop = true;
@@ -67,10 +72,12 @@ const SwipeableCard = ({
   item,
   onSwipeUp,
   isActive,
+  height,
 }: {
   item: MediaLibrary.Asset;
   onSwipeUp: (id: string) => void;
   isActive: boolean;
+  height: number;
 }) => {
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);
@@ -125,7 +132,7 @@ const SwipeableCard = ({
 
   return (
     <GestureDetector gesture={gesture}>
-      <Animated.View style={[styles.card, animatedStyle]}>
+      <Animated.View style={[styles.card, { height }, animatedStyle]}>
         {/* 判斷類型顯示圖片或影片 */}
         {item.mediaType === "video" ? (
           <VideoCard uri={item.uri} isActive={isActive} />
@@ -144,9 +151,18 @@ const SwipeableCard = ({
 // --- 主螢幕 ---
 export default function SwipeScreen() {
   const router = useRouter();
-  const { title, type, albumId } = useLocalSearchParams(); // 接收 albumId
+  const navigation = useNavigation();
+  const { title, type, albumId, monthId } = useLocalSearchParams<{
+    title?: string;
+    type?: string;
+    albumId?: string;
+    monthId?: string;
+  }>();
+  const insets = useSafeAreaInsets();
+  const topHeight = insets.top + TOP_BAR_HEIGHT;
+  const bottomHeight = insets.bottom + BOTTOM_BAR_HEIGHT;
+  const cardHeight = SCREEN_HEIGHT - topHeight - bottomHeight;
   const [photos, setPhotos] = useState<MediaLibrary.Asset[]>([]);
-  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]); // 待刪除暫存區
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isTrashVisible, setIsTrashVisible] = useState(false);
@@ -187,36 +203,18 @@ export default function SwipeScreen() {
       transform: [{ translateY }],
     };
   });
+  // 照片被移走後，索引不能超出範圍
   useEffect(() => {
-    loadCategoryPhotos();
-  }, [title]);
-  // 在 SwipeScreen 組件內新增「保留」邏輯
+    if (photos.length > 0 && currentIndex >= photos.length) {
+      setCurrentIndex(photos.length - 1);
+    }
+  }, [photos.length, currentIndex]);
+
   const handleKeepPhoto = async (assetId: string) => {
     try {
-      let albums = await MediaLibrary.getAlbumsAsync();
-      let organizedAlbum = albums.find((a) => a.title === "已整理");
-
-      if (!organizedAlbum) {
-        organizedAlbum = await MediaLibrary.createAlbumAsync("已整理");
-      }
-
-      // 將資產加入相簿
-      await MediaLibrary.addAssetsToAlbumAsync(
-        [assetId],
-        organizedAlbum.id,
-        false,
-      );
+      await addToOrganizedAlbum(assetId);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-
-      // 【關鍵】：立即從當前的 photos 狀態中移除
-      // 這樣在 Swipe 頁面它會立刻消失
-      setPhotos((prev) => {
-        const newPhotos = prev.filter((p) => p.id !== assetId);
-        if (currentIndex >= newPhotos.length && currentIndex > 0) {
-          setCurrentIndex(newPhotos.length - 1);
-        }
-        return newPhotos;
-      });
+      setPhotos((prev) => prev.filter((p) => p.id !== assetId));
     } catch (error) {
       console.error("歸類失敗:", error);
       Alert.alert("歸類失敗", "無法將照片/影片移入相簿");
@@ -228,56 +226,26 @@ export default function SwipeScreen() {
     flatListRef.current?.scrollToIndex({ index, animated: false });
     toggleGrid(); // 選完自動縮回
   };
-  const loadCategoryPhotos = async () => {
+  const loadCategoryPhotos = useCallback(async () => {
     setLoading(true);
     try {
-      // 1. 先取得「已整理」相簿並抓取 *所有* (照片+影片) 的 ID
-      const albums = await MediaLibrary.getAlbumsAsync();
-      const organizedAlbum = albums.find((a) => a.title === "已整理");
-      let organizedIds = new Set();
+      const [organizedIds, allAssets] = await Promise.all([
+        getOrganizedAssetIds(),
+        fetchAllAssets({
+          sortBy: ["creationTime"],
+          ...(type === "album" && albumId ? { album: albumId } : {}),
+        }),
+      ]);
 
-      if (organizedAlbum) {
-        const organizedAssets = await MediaLibrary.getAssetsAsync({
-          album: organizedAlbum.id,
-          first: 20000,
-          mediaType: ["photo", "video"], // 【關鍵 1】確保這裡有抓到已整理的影片 ID
-        });
-        organizedIds = new Set(organizedAssets.assets.map((a) => a.id));
-      }
-
-      // 2. 根據模式抓取目標照片/影片
-      const fetchOptions: MediaLibrary.AssetsOptions = {
-        mediaType: ["photo", "video"], // 【關鍵 2】全域確保包含影片
-        sortBy: ["creationTime"],
-        ...(type === "album" && albumId
-          ? { album: albumId as string }
-          : { first: 10000 }),
-      };
-
-      const { assets: allAssets } =
-        await MediaLibrary.getAssetsAsync(fetchOptions);
-
-      // 3. 嚴格過濾
       const filtered = allAssets.filter((asset) => {
-        // 檢查是否已在「已整理」中
-        const isAlreadyOrganized = organizedIds.has(asset.id);
-        if (isAlreadyOrganized) return false;
-
-        const date = new Date(asset.creationTime);
-        const now = new Date();
-
+        if (organizedIds.has(asset.id)) return false;
         switch (type) {
-          case "album":
-            return true;
           case "weekly":
-            const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-            return asset.creationTime > oneWeekAgo;
+            return isWithinLastWeek(asset.creationTime);
           case "month":
-            return `${date.getFullYear()}年 ${date.getMonth() + 1}月` === title;
+            return monthKey(asset.creationTime) === monthId;
           case "unorganized_video":
             return asset.mediaType === "video";
-          case "unorganized":
-            return true;
           default:
             return true;
         }
@@ -289,7 +257,11 @@ export default function SwipeScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [type, albumId, monthId]);
+
+  useEffect(() => {
+    loadCategoryPhotos();
+  }, [loadCategoryPhotos]);
 
   // 核心：當照片飛走後，從主列表移除並存入待刪清單
   const handleRemovePhoto = useCallback(
@@ -304,15 +276,44 @@ export default function SwipeScreen() {
   );
 
   // 確定刪除：調用 MediaLibrary API 真正刪除設備照片
+  // 回傳是否真的刪除成功（使用者可能在系統確認框按取消）
   const confirmFinalDelete = async (ids: string[]) => {
     try {
-      await MediaLibrary.deleteAssetsAsync(ids);
+      const deleted = await MediaLibrary.deleteAssetsAsync(ids);
+      if (!deleted) return false;
       setPendingDeleteAssets((prev) => prev.filter((a) => !ids.includes(a.id)));
       if (pendingDeleteAssets.length === ids.length) setIsTrashVisible(false);
-    } catch (e) {
+      return true;
+    } catch {
       Alert.alert("刪除失敗", "無法刪除系統相簿中的照片");
+      return false;
     }
   };
+
+  // 垃圾桶還有東西時離開，先確認，避免待刪清單默默消失
+  usePreventRemove(pendingDeleteAssets.length > 0, ({ data }) => {
+    Alert.alert(
+      "垃圾桶還有項目",
+      `還有 ${pendingDeleteAssets.length} 個項目尚未刪除，離開後會放回未整理。`,
+      [
+        { text: "取消", style: "cancel" },
+        {
+          text: "直接離開",
+          onPress: () => navigation.dispatch(data.action),
+        },
+        {
+          text: "刪除後離開",
+          style: "destructive",
+          onPress: async () => {
+            const deleted = await confirmFinalDelete(
+              pendingDeleteAssets.map((a) => a.id),
+            );
+            if (deleted) navigation.dispatch(data.action);
+          },
+        },
+      ],
+    );
+  });
 
   // 恢復照片：放回待整理清單
   const restoreAssets = (ids: string[]) => {
@@ -337,8 +338,7 @@ export default function SwipeScreen() {
     );
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <ThemedView style={styles.container}>
+    <ThemedView style={styles.container}>
         {/* 1. MIDDLE SECTION */}
         <View style={styles.middleSectionFull}>
           {photos.length > 0 ? (
@@ -356,6 +356,7 @@ export default function SwipeScreen() {
                   onSwipeUp={handleRemovePhoto}
                   // 關鍵修正：傳入 isActive 讓子組件知道現在輪到哪張照片/影片
                   isActive={currentIndex === index}
+                  height={cardHeight}
                 />
               )}
               getItemLayout={(_, index) => ({
@@ -363,7 +364,11 @@ export default function SwipeScreen() {
                 offset: SCREEN_WIDTH * index,
                 index,
               })}
-              contentContainerStyle={{ paddingTop: TOP_HEIGHT }}
+              contentContainerStyle={{ paddingTop: topHeight }}
+              // 每張卡片都可能是影片 player，限制同時掛載的數量
+              windowSize={3}
+              initialNumToRender={2}
+              maxToRenderPerBatch={2}
             />
           ) : (
             <View style={styles.center}>
@@ -373,7 +378,12 @@ export default function SwipeScreen() {
         </View>
 
         {/* 2. TOP SECTION (使用絕對定位，並給予較低的 zIndex 或 讓它先被渲染) */}
-        <View style={styles.absoluteTop}>
+        <View
+          style={[
+            styles.absoluteTop,
+            { height: topHeight, paddingTop: insets.top },
+          ]}
+        >
           <View style={styles.topBar}>
             <TouchableOpacity
               onPress={() => router.back()}
@@ -435,8 +445,28 @@ export default function SwipeScreen() {
         </View>
 
         {/* 3. BOTTOM SECTION */}
-        <View style={[styles.bottomSection, { height: BOTTOM_HEIGHT }]}>
-          <TouchableOpacity style={styles.actionItemHorizontal}>
+        <View
+          style={[
+            styles.bottomSection,
+            { height: bottomHeight, paddingBottom: insets.bottom + 10 },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.actionItemHorizontal}
+            onPress={() =>
+              Alert.alert(
+                "怎麼使用",
+                [
+                  "・左右滑動切換照片",
+                  "・往上滑或按「刪除」放入垃圾桶",
+                  "・按「保留」移到「已整理」相簿，之後不會再出現",
+                  "・點上方標題可開啟網格跳轉或批次選取",
+                  "・右上角垃圾桶可恢復或真正刪除",
+                ].join("\n"),
+                [{ text: "我知道了" }],
+              )
+            }
+          >
             <Ionicons name="help-circle-outline" size={20} color="#fff" />
             <ThemedText style={styles.actionLabelHorizontal}>幫助</ThemedText>
           </TouchableOpacity>
@@ -480,7 +510,7 @@ export default function SwipeScreen() {
               isVisible={true}
               onClose={toggleGrid}
               photos={photos}
-              title={title as string}
+              title={title ?? ""}
               onSelectPhoto={handleJumpToPhoto}
               onBatchDelete={(ids) => {
                 ids.forEach((id) => handleRemovePhoto(id));
@@ -496,8 +526,7 @@ export default function SwipeScreen() {
           onConfirmDelete={confirmFinalDelete}
           onRestore={restoreAssets}
         />
-      </ThemedView>
-    </GestureHandlerRootView>
+    </ThemedView>
   );
 }
 
@@ -555,8 +584,6 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    height: TOP_HEIGHT,
-    paddingTop: 60,
     zIndex: 20, // 提升 zIndex 確保按鈕可點擊
     backgroundColor: "rgba(0,0,0,0.7)", // 稍微給一點背景，視覺更高級
   },
@@ -568,8 +595,6 @@ const styles = StyleSheet.create({
 
   card: {
     width: SCREEN_WIDTH,
-    // 高度 = 總高 - 頂部高度 - 底部高度
-    height: SCREEN_HEIGHT - TOP_HEIGHT - BOTTOM_HEIGHT,
     backgroundColor: "transparent",
     justifyContent: "center",
     alignItems: "center",
@@ -580,17 +605,6 @@ const styles = StyleSheet.create({
     height: "100%",
     // 使用 contain 確保圖片不論比例如何，都會縮放在 Card 區域內
   },
-  // 底部也要固定
-  bottomSectionFixed: {
-    height: BOTTOM_HEIGHT,
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingBottom: 30,
-    backgroundColor: "#000",
-    zIndex: 20, // 底部通常要蓋過所有東西
-  },
-  topSection: { paddingTop: 60, backgroundColor: "#000", zIndex: 0 },
   topBar: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -598,7 +612,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 15,
   },
   fixedInfoContainer: { alignItems: "center" },
-  middleSection: { width: SCREEN_WIDTH },
   badgeContainer: {
     position: "absolute",
     top: -4,
@@ -627,8 +640,6 @@ const styles = StyleSheet.create({
   },
   titleText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
   infoTextMain: { color: "#8E8E93", fontSize: 13, fontWeight: "500" },
-  actionLabel: { color: "#fff", fontSize: 11, marginTop: 4 },
-  actionItem: { alignItems: "center", flex: 1 },
   iconBtn: { padding: 5, position: "relative" },
   center: {
     flex: 1,

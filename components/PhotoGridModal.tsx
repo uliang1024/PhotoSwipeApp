@@ -4,11 +4,11 @@ import React, { useState } from "react";
 import {
     Dimensions,
     FlatList,
-    SafeAreaView,
     StyleSheet,
     TouchableOpacity,
     View
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { ThemedText } from "./themed-text";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");

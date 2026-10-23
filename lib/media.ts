@@ -1,0 +1,57 @@
+import * as MediaLibrary from "expo-media-library";
+
+export const ORGANIZED_ALBUM_TITLE = "已整理";
+const PAGE_SIZE = 1000;
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+// getAssetsAsync 預設只回 20 筆，這裡用 endCursor 分頁抓完全部
+export async function fetchAllAssets(
+  options: Omit<MediaLibrary.AssetsOptions, "first" | "after"> = {},
+): Promise<MediaLibrary.Asset[]> {
+  const result: MediaLibrary.Asset[] = [];
+  let after: string | undefined;
+  while (true) {
+    const page = await MediaLibrary.getAssetsAsync({
+      mediaType: ["photo", "video"],
+      ...options,
+      first: PAGE_SIZE,
+      after,
+    });
+    result.push(...page.assets);
+    if (!page.hasNextPage) return result;
+    after = page.endCursor;
+  }
+}
+
+export async function getOrganizedAssetIds(): Promise<Set<string>> {
+  const album = await MediaLibrary.getAlbumAsync(ORGANIZED_ALBUM_TITLE);
+  if (!album) return new Set();
+  const assets = await fetchAllAssets({ album });
+  return new Set(assets.map((a) => a.id));
+}
+
+// 注意：Android 上 copy=false 是「移動」檔案到該相簿資料夾，不是加參照
+export async function addToOrganizedAlbum(assetId: string) {
+  const album = await MediaLibrary.getAlbumAsync(ORGANIZED_ALBUM_TITLE);
+  if (album) {
+    await MediaLibrary.addAssetsToAlbumAsync([assetId], album, false);
+  } else {
+    // Android 不能建空相簿，建立時要直接帶入第一個 asset
+    await MediaLibrary.createAlbumAsync(ORGANIZED_ALBUM_TITLE, assetId, false);
+  }
+}
+
+// 可排序的月份 key，例如 "2024-03"
+export function monthKey(timestamp: number) {
+  const d = new Date(timestamp);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+export function monthLabel(key: string) {
+  const [year, month] = key.split("-");
+  return `${year}年 ${Number(month)}月`;
+}
+
+export function isWithinLastWeek(timestamp: number) {
+  return timestamp > Date.now() - ONE_WEEK_MS;
+}

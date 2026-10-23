@@ -1,12 +1,28 @@
 import { CategoryItem } from "@/components/CategoryItem";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import {
+  fetchAllAssets,
+  getOrganizedAssetIds,
+  isWithinLastWeek,
+  monthKey,
+  monthLabel,
+  ORGANIZED_ALBUM_TITLE,
+} from "@/lib/media";
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library";
-import { useFocusEffect, useRouter } from "expo-router"; // 1. 引入 useFocusEffect
-import React, { useCallback, useState } from "react"; // 2. 引入 useCallback
-import { ScrollView, StyleSheet, TouchableOpacity, View } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
+import {
+  ActivityIndicator,
+  Linking,
+  ScrollView,
+  StyleSheet,
+  TouchableOpacity,
+  View,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 interface MonthStats {
   title: string;
@@ -15,126 +31,137 @@ interface MonthStats {
   monthId: string;
 }
 
+const MONTH_COLORS = [
+  "#A1CEDC",
+  "#9ED5B2",
+  "#F3E5AB",
+  "#D2B48C",
+  "#E8A1A2",
+  "#B39EB5",
+];
+
 export default function OrganizeScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [loading, setLoading] = useState(true);
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [activeTab, setActiveTab] = useState<"unclassified" | "albums">(
     "unclassified",
   ); // Tab 狀態
   const [stats, setStats] = useState({
     weekly: 0,
     video: 0,
-    screenshot: 0,
     unorganized: 0,
     weeklyFirstPhoto: null as string | null,
   });
   const [monthlyData, setMonthlyData] = useState<MonthStats[]>([]);
   const [allAlbums, setAllAlbums] = useState<MediaLibrary.Album[]>([]); // 儲存所有相簿
+
+  const analyzePhotoLibrary = useCallback(async () => {
+    const { status } = await MediaLibrary.requestPermissionsAsync();
+    if (status !== "granted") {
+      setPermissionDenied(true);
+      setLoading(false);
+      return;
+    }
+    setPermissionDenied(false);
+
+    try {
+      const albums = await MediaLibrary.getAlbumsAsync({
+        includeSmartAlbums: true,
+      });
+      setAllAlbums(
+        albums
+          .filter((a) => a.title !== ORGANIZED_ALBUM_TITLE)
+          .sort((a, b) => b.assetCount - a.assetCount),
+      );
+
+      const [organizedIds, allAssets] = await Promise.all([
+        getOrganizedAssetIds(),
+        fetchAllAssets({ sortBy: ["creationTime"] }),
+      ]);
+      const unorganizedAssets = allAssets.filter(
+        (asset) => !organizedIds.has(asset.id),
+      );
+
+      const monthsMap: Record<string, number> = {};
+      let videoCount = 0;
+      let weeklyCount = 0;
+      let weeklyPhoto: string | null = null;
+
+      // 由舊到新走訪，本週封面取本週最早的一張照片
+      for (let i = unorganizedAssets.length - 1; i >= 0; i--) {
+        const asset = unorganizedAssets[i];
+        if (asset.mediaType === "video") videoCount++;
+        if (isWithinLastWeek(asset.creationTime)) {
+          weeklyCount++;
+          if (!weeklyPhoto && asset.mediaType === "photo") {
+            weeklyPhoto = asset.uri;
+          }
+        }
+        const key = monthKey(asset.creationTime);
+        monthsMap[key] = (monthsMap[key] || 0) + 1;
+      }
+
+      const formattedMonths = Object.keys(monthsMap)
+        .sort((a, b) => b.localeCompare(a))
+        .map((key, index) => ({
+          title: monthLabel(key),
+          count: monthsMap[key],
+          color: MONTH_COLORS[index % MONTH_COLORS.length],
+          monthId: key,
+        }));
+
+      setStats({
+        weekly: weeklyCount,
+        video: videoCount,
+        unorganized: unorganizedAssets.length,
+        weeklyFirstPhoto: weeklyPhoto,
+      });
+      setMonthlyData(formattedMonths);
+    } catch (error) {
+      console.error("分析相簿失敗:", error);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       analyzePhotoLibrary();
-    }, []),
+    }, [analyzePhotoLibrary]),
   );
 
-  const analyzePhotoLibrary = async () => {
-    if (monthlyData.length === 0) setLoading(true);
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== "granted") return;
-
-    // 1. 取得所有相簿
-    const albums = await MediaLibrary.getAlbumsAsync({
-      includeSmartAlbums: true,
-    });
-    const filteredAlbums = albums.filter((a) => a.title !== "已整理");
-    setAllAlbums(filteredAlbums.sort((a, b) => b.assetCount - a.assetCount));
-
-    // 2. 找出「已整理」相簿並抓取 *所有* ID (包括照片和影片)
-    const organizedAlbum = albums.find((a) => a.title === "已整理");
-    let organizedAssetIds = new Set();
-
-    if (organizedAlbum) {
-      const organizedAssets = await MediaLibrary.getAssetsAsync({
-        album: organizedAlbum.id,
-        first: 20000,
-        mediaType: ["photo", "video"], // 【核心修正 1】：確保抓取已整理相簿時，也包含影片 ID
-      });
-      organizedAssetIds = new Set(organizedAssets.assets.map((a) => a.id));
-    }
-
-    // 抓取所有內容時也要確保包含兩者
-    const allAssets = await MediaLibrary.getAssetsAsync({
-      mediaType: ["photo", "video"],
-      first: 10000,
-      sortBy: ["creationTime"],
-    });
-
-    // 【核心修正 2】：產生過濾清單
-    const unorganizedAssets = allAssets.assets.filter(
-      (asset) => !organizedAssetIds.has(asset.id),
+  if (loading)
+    return (
+      <ThemedView style={styles.center}>
+        <ActivityIndicator color="#fff" />
+      </ThemedView>
     );
 
-    const monthsMap: { [key: string]: number } = {};
-    let videoCount = 0;
-    const now = new Date();
-    const oneWeekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-    let weeklyCount = 0;
-    let weeklyPhoto: string | null = null;
-
-    // 使用已經排除掉「已整理」的清單來進行統計
-    [...unorganizedAssets].reverse().forEach((asset) => {
-      // 統計未整理的影片 (現在這裡會正確排除已整理的影片了)
-      if (asset.mediaType === "video") {
-        videoCount++;
-      }
-
-      // 統計本週
-      if (asset.creationTime > oneWeekAgo) {
-        weeklyCount++;
-        if (!weeklyPhoto && asset.mediaType === "photo") {
-          weeklyPhoto = asset.uri;
-        }
-      }
-
-      // 統計月份
-      const date = new Date(asset.creationTime);
-      const key = `${date.getFullYear()}年 ${date.getMonth() + 1}月`;
-      monthsMap[key] = (monthsMap[key] || 0) + 1;
-    });
-
-    // ... 後續設定 State 的邏輯保持不變 ...
-    const colors = [
-      "#A1CEDC",
-      "#9ED5B2",
-      "#F3E5AB",
-      "#D2B48C",
-      "#E8A1A2",
-      "#B39EB5",
-    ];
-    const formattedMonths = Object.keys(monthsMap)
-      .map((key, index) => ({
-        title: key,
-        count: monthsMap[key],
-        color: colors[index % colors.length],
-        monthId: key,
-      }))
-      .sort((a, b) => b.title.localeCompare(a.title));
-
-    setStats({
-      weekly: weeklyCount,
-      video: videoCount, // 這是修正後的正確數字
-      screenshot: 0,
-      unorganized: unorganizedAssets.length,
-      weeklyFirstPhoto: weeklyPhoto,
-    });
-    setMonthlyData(formattedMonths);
-    setLoading(false);
-  };
+  if (permissionDenied)
+    return (
+      <ThemedView style={styles.center}>
+        <ThemedText style={styles.permissionText}>
+          需要相簿權限才能整理照片
+        </ThemedText>
+        <TouchableOpacity
+          style={styles.permissionBtn}
+          onPress={() => Linking.openSettings()}
+        >
+          <ThemedText style={styles.topTabTextActive}>前往設定</ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
+    );
 
   return (
     <ThemedView style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + 16 },
+        ]}
       >
         {/* Header */}
         <View style={styles.header}>
@@ -260,7 +287,7 @@ export default function OrganizeScreen() {
               </ThemedText>
               {monthlyData.map((item, index) => (
                 <CategoryItem
-                  key={index}
+                  key={item.monthId}
                   title={item.title}
                   count={item.count}
                   color={item.color}
@@ -268,7 +295,11 @@ export default function OrganizeScreen() {
                   onPress={() =>
                     router.push({
                       pathname: "/swipe",
-                      params: { title: item.title, type: "month" },
+                      params: {
+                        title: item.title,
+                        type: "month",
+                        monthId: item.monthId,
+                      },
                     })
                   }
                 />
@@ -300,7 +331,7 @@ export default function OrganizeScreen() {
             ))}
           </View>
         )}
-        <View style={{ height: 120 }} />
+        <View style={{ height: insets.bottom + 20 }} />
       </ScrollView>
     </ThemedView>
   );
@@ -311,54 +342,20 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#000",
   },
-  containerSmall: {
-    paddingVertical: 10, // 變矮
-    borderRadius: 10,
-    marginBottom: 4, // 變窄
-  },
-  leftContent: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  colorDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 12,
-  },
-  dotSmall: {
-    width: 6,
-    height: 6,
-    marginRight: 10,
-  },
-  title: {
-    fontSize: 16,
-    fontWeight: "500",
-    color: "#fff",
-  },
-  titleSmall: {
-    fontSize: 14, // 字變小
-  },
-  rightContent: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  count: {
-    fontSize: 16,
-    color: "#8E8E93",
-    marginRight: 8,
-  },
-  countSmall: {
-    fontSize: 14, // 數字變小
-    marginRight: 6,
-  },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: "#000",
   },
-  scrollContent: { paddingHorizontal: 20, paddingTop: 60 },
+  permissionText: { color: "#fff", marginBottom: 16 },
+  permissionBtn: {
+    backgroundColor: "#fff",
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 20,
+  },
+  scrollContent: { paddingHorizontal: 20 },
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
@@ -408,13 +405,4 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   monthlyContainer: { marginTop: 10 },
-  recentGrid: { flexDirection: "row", gap: 15, marginBottom: 15 },
-  recentCard: {
-    flex: 1,
-    height: 100,
-    borderRadius: 15,
-    justifyContent: "flex-end",
-    padding: 12,
-  },
-  recentCardText: { color: "#fff", fontWeight: "600" },
 });

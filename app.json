@@ -2,12 +2,11 @@
   "expo": {
     "name": "PhotoSwipeApp",
     "slug": "PhotoSwipeApp",
-    "privacy": "public", 
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "photoswipeapp",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,

@@ -1,35 +1,13 @@
-import { Tabs } from 'expo-router';
-import React from 'react';
-
-import { HapticTab } from '@/components/haptic-tab';
-import { IconSymbol } from '@/components/ui/icon-symbol';
-import { Colors } from '@/constants/theme';
-import { useColorScheme } from '@/hooks/use-color-scheme';
+import { Tabs } from "expo-router";
+import React from "react";
 
 export default function TabLayout() {
-  const colorScheme = useColorScheme();
-
+  // 目前只有一個分頁，先隱藏 tab bar；之後新增分頁時再打開
   return (
     <Tabs
-      screenOptions={{
-        tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        headerShown: false,
-        tabBarButton: HapticTab,
-      }}>
-      <Tabs.Screen
-        name="index"
-        options={{
-          title: 'Home',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="house.fill" color={color} />,
-        }}
-      />
-      <Tabs.Screen
-        name="explore"
-        options={{
-          title: 'Explore',
-          tabBarIcon: ({ color }) => <IconSymbol size={28} name="paperplane.fill" color={color} />,
-        }}
-      />
+      screenOptions={{ headerShown: false, tabBarStyle: { display: "none" } }}
+    >
+      <Tabs.Screen name="index" options={{ title: "整理" }} />
     </Tabs>
   );
 }
