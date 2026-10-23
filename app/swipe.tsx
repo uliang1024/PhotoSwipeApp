@@ -9,12 +9,12 @@ import * as MediaLibrary from "expo-media-library";
 import { usePreventRemove } from "@react-navigation/native";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import {
-  addToOrganizedAlbum,
-  fetchAllAssets,
-  getOrganizedAssetIds,
-  isWithinLastWeek,
-  monthKey,
-} from "@/lib/media";
+  deleteAssets,
+  getLibrarySnapshot,
+  keepAsset,
+  refreshLibrary,
+} from "@/lib/library-store";
+import { fetchAllAssets, isWithinLastWeek, monthKey } from "@/lib/media";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useState } from "react";
 import {
@@ -212,7 +212,7 @@ export default function SwipeScreen() {
 
   const handleKeepPhoto = async (assetId: string) => {
     try {
-      await addToOrganizedAlbum(assetId);
+      await keepAsset(assetId);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setPhotos((prev) => prev.filter((p) => p.id !== assetId));
     } catch (error) {
@@ -229,15 +229,16 @@ export default function SwipeScreen() {
   const loadCategoryPhotos = useCallback(async () => {
     setLoading(true);
     try {
-      const [organizedIds, allAssets] = await Promise.all([
-        getOrganizedAssetIds(),
-        fetchAllAssets({
-          sortBy: ["creationTime"],
-          ...(type === "album" && albumId ? { album: albumId } : {}),
-        }),
-      ]);
+      // 一般情況直接命中首頁載好的快取，不重掃
+      await refreshLibrary();
+      const { assets, organizedIds } = getLibrarySnapshot();
+      // asset 本身不帶所屬相簿，相簿模式只能另外抓該相簿
+      const source =
+        type === "album" && albumId
+          ? await fetchAllAssets({ album: albumId, sortBy: ["creationTime"] })
+          : assets;
 
-      const filtered = allAssets.filter((asset) => {
+      const filtered = source.filter((asset) => {
         if (organizedIds.has(asset.id)) return false;
         switch (type) {
           case "weekly":
@@ -276,10 +277,9 @@ export default function SwipeScreen() {
   );
 
   // 確定刪除：調用 MediaLibrary API 真正刪除設備照片
-  // 回傳是否真的刪除成功（使用者可能在系統確認框按取消）
   const confirmFinalDelete = async (ids: string[]) => {
     try {
-      const deleted = await MediaLibrary.deleteAssetsAsync(ids);
+      const deleted = await deleteAssets(ids);
       if (!deleted) return false;
       setPendingDeleteAssets((prev) => prev.filter((a) => !ids.includes(a.id)));
       if (pendingDeleteAssets.length === ids.length) setIsTrashVisible(false);

@@ -1,9 +1,8 @@
 import { CategoryItem } from "@/components/CategoryItem";
 import { ThemedText } from "@/components/themed-text";
 import { ThemedView } from "@/components/themed-view";
+import { refreshLibrary, useLibrary } from "@/lib/library-store";
 import {
-  fetchAllAssets,
-  getOrganizedAssetIds,
   isWithinLastWeek,
   monthKey,
   monthLabel,
@@ -13,7 +12,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library";
 import { useFocusEffect, useRouter } from "expo-router";
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Linking,
@@ -40,106 +39,95 @@ const MONTH_COLORS = [
   "#B39EB5",
 ];
 
+function computeStats(
+  assets: MediaLibrary.Asset[],
+  organizedIds: Set<string>,
+) {
+  const monthsMap: Record<string, number> = {};
+  let unorganized = 0;
+  let video = 0;
+  let weekly = 0;
+  let weeklyFirstPhoto: string | null = null;
+
+  // assets 是新到舊，倒著走訪讓本週封面取本週最早的一張照片
+  for (let i = assets.length - 1; i >= 0; i--) {
+    const asset = assets[i];
+    if (organizedIds.has(asset.id)) continue;
+    unorganized++;
+    if (asset.mediaType === "video") video++;
+    if (isWithinLastWeek(asset.creationTime)) {
+      weekly++;
+      if (!weeklyFirstPhoto && asset.mediaType === "photo") {
+        weeklyFirstPhoto = asset.uri;
+      }
+    }
+    const key = monthKey(asset.creationTime);
+    monthsMap[key] = (monthsMap[key] || 0) + 1;
+  }
+
+  const monthlyData: MonthStats[] = Object.keys(monthsMap)
+    .sort((a, b) => b.localeCompare(a))
+    .map((key, index) => ({
+      title: monthLabel(key),
+      count: monthsMap[key],
+      color: MONTH_COLORS[index % MONTH_COLORS.length],
+      monthId: key,
+    }));
+
+  return {
+    stats: { weekly, video, unorganized, weeklyFirstPhoto },
+    monthlyData,
+  };
+}
+
 export default function OrganizeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [loading, setLoading] = useState(true);
-  const [permissionDenied, setPermissionDenied] = useState(false);
+  const library = useLibrary();
   const [activeTab, setActiveTab] = useState<"unclassified" | "albums">(
     "unclassified",
   ); // Tab 狀態
-  const [stats, setStats] = useState({
-    weekly: 0,
-    video: 0,
-    unorganized: 0,
-    weeklyFirstPhoto: null as string | null,
-  });
-  const [monthlyData, setMonthlyData] = useState<MonthStats[]>([]);
-  const [allAlbums, setAllAlbums] = useState<MediaLibrary.Album[]>([]); // 儲存所有相簿
 
-  const analyzePhotoLibrary = useCallback(async () => {
-    const { status } = await MediaLibrary.requestPermissionsAsync();
-    if (status !== "granted") {
-      setPermissionDenied(true);
-      setLoading(false);
-      return;
-    }
-    setPermissionDenied(false);
-
-    try {
-      const albums = await MediaLibrary.getAlbumsAsync({
-        includeSmartAlbums: true,
-      });
-      setAllAlbums(
-        albums
-          .filter((a) => a.title !== ORGANIZED_ALBUM_TITLE)
-          .sort((a, b) => b.assetCount - a.assetCount),
-      );
-
-      const [organizedIds, allAssets] = await Promise.all([
-        getOrganizedAssetIds(),
-        fetchAllAssets({ sortBy: ["creationTime"] }),
-      ]);
-      const unorganizedAssets = allAssets.filter(
-        (asset) => !organizedIds.has(asset.id),
-      );
-
-      const monthsMap: Record<string, number> = {};
-      let videoCount = 0;
-      let weeklyCount = 0;
-      let weeklyPhoto: string | null = null;
-
-      // 由舊到新走訪，本週封面取本週最早的一張照片
-      for (let i = unorganizedAssets.length - 1; i >= 0; i--) {
-        const asset = unorganizedAssets[i];
-        if (asset.mediaType === "video") videoCount++;
-        if (isWithinLastWeek(asset.creationTime)) {
-          weeklyCount++;
-          if (!weeklyPhoto && asset.mediaType === "photo") {
-            weeklyPhoto = asset.uri;
-          }
-        }
-        const key = monthKey(asset.creationTime);
-        monthsMap[key] = (monthsMap[key] || 0) + 1;
-      }
-
-      const formattedMonths = Object.keys(monthsMap)
-        .sort((a, b) => b.localeCompare(a))
-        .map((key, index) => ({
-          title: monthLabel(key),
-          count: monthsMap[key],
-          color: MONTH_COLORS[index % MONTH_COLORS.length],
-          monthId: key,
-        }));
-
-      setStats({
-        weekly: weeklyCount,
-        video: videoCount,
-        unorganized: unorganizedAssets.length,
-        weeklyFirstPhoto: weeklyPhoto,
-      });
-      setMonthlyData(formattedMonths);
-    } catch (error) {
-      console.error("分析相簿失敗:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useFocusEffect(
-    useCallback(() => {
-      analyzePhotoLibrary();
-    }, [analyzePhotoLibrary]),
+  const { stats, monthlyData } = useMemo(
+    () => computeStats(library.assets, library.organizedIds),
+    [library.assets, library.organizedIds],
+  );
+  const allAlbums = useMemo(
+    () =>
+      library.albums
+        .filter((a) => a.title !== ORGANIZED_ALBUM_TITLE)
+        .sort((a, b) => b.assetCount - a.assetCount),
+    [library.albums],
   );
 
-  if (loading)
+  // 有快取就直接顯示，只有快取過期時才在背景重掃
+  useFocusEffect(
+    useCallback(() => {
+      refreshLibrary();
+    }, []),
+  );
+
+  if (library.status === "idle" || library.status === "loading")
     return (
       <ThemedView style={styles.center}>
         <ActivityIndicator color="#fff" />
       </ThemedView>
     );
 
-  if (permissionDenied)
+  if (library.status === "error")
+    return (
+      <ThemedView style={styles.center}>
+        <ThemedText style={styles.permissionText}>載入相簿失敗</ThemedText>
+        <TouchableOpacity
+          style={styles.permissionBtn}
+          onPress={() => refreshLibrary({ force: true })}
+        >
+          <ThemedText style={styles.topTabTextActive}>重試</ThemedText>
+        </TouchableOpacity>
+      </ThemedView>
+    );
+
+  if (library.status === "denied")
     return (
       <ThemedView style={styles.center}>
         <ThemedText style={styles.permissionText}>
@@ -170,7 +158,7 @@ export default function OrganizeScreen() {
           </ThemedText>
           <TouchableOpacity
             style={styles.infoBtn}
-            onPress={analyzePhotoLibrary}
+            onPress={() => refreshLibrary({ force: true })}
           >
             <Ionicons name="refresh-circle-outline" size={28} color="#fff" />
           </TouchableOpacity>
