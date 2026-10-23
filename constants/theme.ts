@@ -13,6 +13,7 @@ export const Colors = {
   onInverse: "#000",
   accent: "#007AFF",
   danger: "#FF3B30",
+  success: "#34C759",
   scrimLight: "rgba(0,0,0,0.3)", // 圖片上的遮罩
   scrim: "rgba(0,0,0,0.5)",
   scrimStrong: "rgba(0,0,0,0.7)",

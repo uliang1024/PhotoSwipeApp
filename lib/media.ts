@@ -31,13 +31,21 @@ export async function getOrganizedAssetIds(): Promise<Set<string>> {
 }
 
 // 注意：Android 上 copy=false 是「移動」檔案到該相簿資料夾，不是加參照
-export async function addToOrganizedAlbum(assetId: string) {
-  const album = await MediaLibrary.getAlbumAsync(ORGANIZED_ALBUM_TITLE);
-  if (album) {
-    await MediaLibrary.addAssetsToAlbumAsync([assetId], album, false);
-  } else {
+export async function addToOrganizedAlbum(assetIds: string[]) {
+  if (assetIds.length === 0) return;
+  let rest = assetIds;
+  let album = await MediaLibrary.getAlbumAsync(ORGANIZED_ALBUM_TITLE);
+  if (!album) {
     // Android 不能建空相簿，建立時要直接帶入第一個 asset
-    await MediaLibrary.createAlbumAsync(ORGANIZED_ALBUM_TITLE, assetId, false);
+    album = await MediaLibrary.createAlbumAsync(
+      ORGANIZED_ALBUM_TITLE,
+      assetIds[0],
+      false,
+    );
+    rest = assetIds.slice(1);
+  }
+  if (rest.length > 0) {
+    await MediaLibrary.addAssetsToAlbumAsync(rest, album, false);
   }
 }
 

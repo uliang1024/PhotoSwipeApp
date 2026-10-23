@@ -11,7 +11,7 @@ import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import {
   deleteAssets,
   getLibrarySnapshot,
-  keepAsset,
+  keepAssets,
   refreshLibrary,
 } from "@/lib/library-store";
 import { fetchAllAssets, isWithinLastWeek, monthKey } from "@/lib/media";
@@ -68,15 +68,26 @@ const VideoCard = ({ uri, isActive }: { uri: string; isActive: boolean }) => {
   );
 };
 
-// --- 子組件：SwipeableCard ---
+type SwipeAction = "keep" | "delete";
+
+// 一次操作（單張滑動或網格批次）記錄每張的原位置，供復原插回
+interface HistoryEntry {
+  action: SwipeAction;
+  items: { asset: MediaLibrary.Asset; index: number }[];
+}
+
+const SWIPE_DISTANCE = 120;
+const SWIPE_VELOCITY = 500;
+
+// --- 子組件：SwipeableCard（上滑刪除、下滑保留）---
 const SwipeableCard = ({
   item,
-  onSwipeUp,
+  onSwipe,
   isActive,
   height,
 }: {
   item: MediaLibrary.Asset;
-  onSwipeUp: (id: string) => void;
+  onSwipe: (id: string, action: SwipeAction) => void;
   isActive: boolean;
   height: number;
 }) => {
@@ -86,37 +97,62 @@ const SwipeableCard = ({
   const gesture = Gesture.Pan()
     .activeOffsetY([-10, 10])
     .onUpdate((event) => {
-      if (event.translationY < 0) translateY.value = event.translationY;
+      translateY.value = event.translationY;
     })
     .onEnd((event) => {
-      if (event.translationY < -120 || event.velocityY < -500) {
-        translateY.value = withTiming(-SCREEN_HEIGHT, { duration: 250 }, () => {
-          runOnJS(onSwipeUp)(item.id);
-        });
-        opacity.value = withTiming(0, { duration: 200 });
-        runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
-      } else {
+      const { translationY: dy, velocityY: vy } = event;
+      const up = dy < -SWIPE_DISTANCE || (vy < -SWIPE_VELOCITY && dy < 0);
+      const down = dy > SWIPE_DISTANCE || (vy > SWIPE_VELOCITY && dy > 0);
+      if (!up && !down) {
         translateY.value = withSpring(0, { damping: 15 });
+        return;
       }
+      const action: SwipeAction = up ? "delete" : "keep";
+      translateY.value = withTiming(
+        up ? -SCREEN_HEIGHT : SCREEN_HEIGHT,
+        { duration: 250 },
+        () => {
+          runOnJS(onSwipe)(item.id, action);
+        },
+      );
+      opacity.value = withTiming(0, { duration: 200 });
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
     });
+
+  const deleteHintStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateY.value,
+      [0, -SWIPE_DISTANCE],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
+  const keepHintStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      translateY.value,
+      [0, SWIPE_DISTANCE],
+      [0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
 
   const animatedStyle = useAnimatedStyle(() => {
     const rotate = interpolate(
       translateY.value,
-      [0, -200],
-      [0, 8],
+      [-200, 0, 200],
+      [8, 0, -8],
       Extrapolation.CLAMP,
     );
     const scale = interpolate(
       translateY.value,
-      [0, -200],
-      [1, 0.85],
+      [-200, 0, 200],
+      [0.85, 1, 0.85],
       Extrapolation.CLAMP,
     );
     const translateX = interpolate(
       translateY.value,
-      [0, -200],
-      [0, 50],
+      [-200, 0, 200],
+      [50, 0, -50],
       Extrapolation.CLAMP,
     );
 
@@ -144,6 +180,18 @@ const SwipeableCard = ({
             contentFit="contain"
           />
         )}
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.swipeHint, styles.deleteHint, deleteHintStyle]}
+        >
+          <ThemedText style={styles.swipeHintText}>刪除</ThemedText>
+        </Animated.View>
+        <Animated.View
+          pointerEvents="none"
+          style={[styles.swipeHint, styles.keepHint, keepHintStyle]}
+        >
+          <ThemedText style={styles.swipeHintText}>保留</ThemedText>
+        </Animated.View>
       </Animated.View>
     </GestureDetector>
   );
@@ -170,6 +218,11 @@ export default function SwipeScreen() {
   const [pendingDeleteAssets, setPendingDeleteAssets] = useState<
     MediaLibrary.Asset[]
   >([]);
+  // 保留也先暫存，離開時才批次寫入「已整理」，讓復原只需改本機狀態
+  const [pendingKeepAssets, setPendingKeepAssets] = useState<
+    MediaLibrary.Asset[]
+  >([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const flatListRef = React.useRef<FlatList>(null); // 用於控制跳轉
   const [isGridVisible, setIsGridVisible] = useState(false);
   // 1. 箭頭旋轉與視窗下推的 SharedValue
@@ -211,16 +264,6 @@ export default function SwipeScreen() {
     }
   }, [photos.length, currentIndex]);
 
-  const handleKeepPhoto = async (assetId: string) => {
-    try {
-      await keepAsset(assetId);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      setPhotos((prev) => prev.filter((p) => p.id !== assetId));
-    } catch (error) {
-      console.error("歸類失敗:", error);
-      Alert.alert("歸類失敗", "無法將照片/影片移入相簿");
-    }
-  };
   // 跳轉至特定照片
   const handleJumpToPhoto = (index: number) => {
     setCurrentIndex(index);
@@ -265,17 +308,79 @@ export default function SwipeScreen() {
     loadCategoryPhotos();
   }, [loadCategoryPhotos]);
 
-  // 核心：當照片飛走後，從主列表移除並存入待刪清單
-  const handleRemovePhoto = useCallback(
-    (id: string) => {
-      const assetToRemove = photos.find((p) => p.id === id);
-      if (assetToRemove) {
-        setPendingDeleteAssets((prev) => [...prev, assetToRemove]);
-        setPhotos((prev) => prev.filter((p) => p.id !== id));
+  // 核心：照片飛走後從主列表移除，放進對應的暫存區並記錄歷史
+  const stageAssets = useCallback(
+    (action: SwipeAction, ids: string[]) => {
+      const idSet = new Set(ids);
+      const items = photos.flatMap((asset, index) =>
+        idSet.has(asset.id) ? [{ asset, index }] : [],
+      );
+      if (items.length === 0) return;
+      const assets = items.map((i) => i.asset);
+      const setPending =
+        action === "keep" ? setPendingKeepAssets : setPendingDeleteAssets;
+      setPending((prev) => [...prev, ...assets]);
+      setPhotos((prev) => prev.filter((p) => !idSet.has(p.id)));
+      setHistory((prev) => [...prev, { action, items }]);
+      if (action === "keep") {
+        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     },
     [photos],
   );
+
+  const handleSwipe = useCallback(
+    (id: string, action: SwipeAction) => stageAssets(action, [id]),
+    [stageAssets],
+  );
+
+  // 復原最近一次仍有效的操作（已從垃圾桶恢復或已真正刪除的會跳過）
+  const undoLast = () => {
+    for (let h = history.length - 1; h >= 0; h--) {
+      const entry = history[h];
+      const pending =
+        entry.action === "keep" ? pendingKeepAssets : pendingDeleteAssets;
+      const pendingIds = new Set(pending.map((a) => a.id));
+      const items = entry.items
+        .filter((i) => pendingIds.has(i.asset.id))
+        .sort((a, b) => a.index - b.index);
+      if (items.length === 0) continue;
+
+      const ids = new Set(items.map((i) => i.asset.id));
+      const setPending =
+        entry.action === "keep" ? setPendingKeepAssets : setPendingDeleteAssets;
+      setPending((prev) => prev.filter((a) => !ids.has(a.id)));
+      setHistory(history.slice(0, h));
+
+      const next = [...photos];
+      for (const { asset, index } of items) {
+        next.splice(Math.min(index, next.length), 0, asset);
+      }
+      setPhotos(next);
+      const target = Math.min(items[0].index, next.length - 1);
+      setCurrentIndex(target);
+      requestAnimationFrame(() =>
+        flatListRef.current?.scrollToIndex({ index: target, animated: false }),
+      );
+      Haptics.selectionAsync();
+      return;
+    }
+    setHistory([]);
+  };
+
+  // 把暫存的保留寫入「已整理」相簿
+  const commitKeeps = async () => {
+    if (pendingKeepAssets.length === 0) return true;
+    try {
+      await keepAssets(pendingKeepAssets.map((a) => a.id));
+      setPendingKeepAssets([]);
+      return true;
+    } catch (error) {
+      console.error("歸類失敗:", error);
+      Alert.alert("歸類失敗", "無法將照片/影片移入「已整理」相簿");
+      return false;
+    }
+  };
 
   // 確定刪除：調用 MediaLibrary API 真正刪除設備照片
   const confirmFinalDelete = async (ids: string[]) => {
@@ -291,26 +396,38 @@ export default function SwipeScreen() {
     }
   };
 
-  // 垃圾桶還有東西時離開，先確認，避免待刪清單默默消失
-  usePreventRemove(pendingDeleteAssets.length > 0, ({ data }) => {
+  // 離開時寫入暫存的保留；垃圾桶還有東西才詢問，避免待刪清單默默消失
+  const hasPending =
+    pendingKeepAssets.length > 0 || pendingDeleteAssets.length > 0;
+  usePreventRemove(hasPending, ({ data }) => {
+    const leave = async (withDelete: boolean) => {
+      if (!(await commitKeeps())) return;
+      if (
+        withDelete &&
+        !(await confirmFinalDelete(pendingDeleteAssets.map((a) => a.id)))
+      )
+        return;
+      navigation.dispatch(data.action);
+    };
+
+    if (pendingDeleteAssets.length === 0) {
+      leave(false);
+      return;
+    }
+    const keepNote =
+      pendingKeepAssets.length > 0
+        ? `保留的 ${pendingKeepAssets.length} 張會移到「已整理」。\n`
+        : "";
     Alert.alert(
       "垃圾桶還有項目",
-      `還有 ${pendingDeleteAssets.length} 個項目尚未刪除，離開後會放回未整理。`,
+      `${keepNote}垃圾桶還有 ${pendingDeleteAssets.length} 張尚未刪除，不刪除的話會放回未整理。`,
       [
         { text: "取消", style: "cancel" },
-        {
-          text: "直接離開",
-          onPress: () => navigation.dispatch(data.action),
-        },
+        { text: "不刪除，離開", onPress: () => leave(false) },
         {
           text: "刪除後離開",
           style: "destructive",
-          onPress: async () => {
-            const deleted = await confirmFinalDelete(
-              pendingDeleteAssets.map((a) => a.id),
-            );
-            if (deleted) navigation.dispatch(data.action);
-          },
+          onPress: () => leave(true),
         },
       ],
     );
@@ -362,7 +479,7 @@ export default function SwipeScreen() {
               renderItem={({ item, index }) => (
                 <SwipeableCard
                   item={item}
-                  onSwipeUp={handleRemovePhoto}
+                  onSwipe={handleSwipe}
                   // 關鍵修正：傳入 isActive 讓子組件知道現在輪到哪張照片/影片
                   isActive={currentIndex === index}
                   height={cardHeight}
@@ -394,12 +511,37 @@ export default function SwipeScreen() {
           ]}
         >
           <View style={styles.topBar}>
-            <TouchableOpacity
-              onPress={() => router.back()}
-              style={styles.iconBtn}
-            >
-              <Ionicons name="close" size={28} color={Colors.text} />
-            </TouchableOpacity>
+            <View style={styles.topBarSide}>
+              <TouchableOpacity
+                onPress={() => router.back()}
+                style={styles.iconBtn}
+              >
+                <Ionicons name="close" size={28} color={Colors.text} />
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.iconBtn}
+                onPress={() =>
+                  Alert.alert(
+                    "怎麼使用",
+                    [
+                      "・左右滑動切換照片",
+                      "・往上滑或按「刪除」放入垃圾桶",
+                      "・往下滑或按「保留」，離開時移到「已整理」相簿，之後不會再出現",
+                      "・按「復原」可撤回上一步",
+                      "・點上方標題可開啟網格跳轉或批次選取",
+                      "・右上角垃圾桶可恢復或真正刪除",
+                    ].join("\n"),
+                    [{ text: "我知道了" }],
+                  )
+                }
+              >
+                <Ionicons
+                  name="help-circle-outline"
+                  size={24}
+                  color={Colors.text}
+                />
+              </TouchableOpacity>
+            </View>
             {/* 修改中間標題：點擊開啟網格 */}
             <TouchableOpacity style={styles.titleBadge} onPress={toggleGrid}>
               <View style={{ flexDirection: "row", alignItems: "center" }}>
@@ -412,7 +554,7 @@ export default function SwipeScreen() {
               </View>
             </TouchableOpacity>
             <TouchableOpacity
-              style={styles.iconBtn}
+              style={[styles.iconBtn, styles.topBarSide, styles.topBarRight]}
               onPress={() => {
                 if (pendingDeleteAssets.length === 0) {
                   // 如果是空的，跳出系統提示
@@ -461,41 +603,41 @@ export default function SwipeScreen() {
           ]}
         >
           <TouchableOpacity
-            style={styles.actionItemHorizontal}
-            onPress={() =>
-              Alert.alert(
-                "怎麼使用",
-                [
-                  "・左右滑動切換照片",
-                  "・往上滑或按「刪除」放入垃圾桶",
-                  "・按「保留」移到「已整理」相簿，之後不會再出現",
-                  "・點上方標題可開啟網格跳轉或批次選取",
-                  "・右上角垃圾桶可恢復或真正刪除",
-                ].join("\n"),
-                [{ text: "我知道了" }],
-              )
-            }
+            style={[
+              styles.actionItemHorizontal,
+              history.length === 0 && styles.actionDisabled,
+            ]}
+            disabled={history.length === 0}
+            onPress={undoLast}
           >
-            <Ionicons name="help-circle-outline" size={20} color={Colors.text} />
-            <ThemedText style={styles.actionLabelHorizontal}>幫助</ThemedText>
+            <Ionicons name="arrow-undo-outline" size={20} color={Colors.text} />
+            <ThemedText style={styles.actionLabelHorizontal}>復原</ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.actionItemHorizontal}
             onPress={() => {
               if (photos[currentIndex])
-                handleKeepPhoto(photos[currentIndex].id);
+                stageAssets("keep", [photos[currentIndex].id]);
             }}
           >
-            <Ionicons name="download-outline" size={20} color={Colors.text} />
-            <ThemedText style={styles.actionLabelHorizontal}>保留</ThemedText>
+            <Ionicons
+              name="checkmark-outline"
+              size={20}
+              color={Colors.success}
+            />
+            <ThemedText
+              style={[styles.actionLabelHorizontal, { color: Colors.success }]}
+            >
+              保留{pendingKeepAssets.length > 0 ? ` ${pendingKeepAssets.length}` : ""}
+            </ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.actionItemHorizontal}
             onPress={() => {
               if (photos[currentIndex])
-                handleRemovePhoto(photos[currentIndex].id);
+                stageAssets("delete", [photos[currentIndex].id]);
             }}
           >
             <Ionicons name="close-outline" size={20} color={Colors.danger} />
@@ -521,9 +663,7 @@ export default function SwipeScreen() {
               photos={photos}
               title={title ?? ""}
               onSelectPhoto={handleJumpToPhoto}
-              onBatchDelete={(ids) => {
-                ids.forEach((id) => handleRemovePhoto(id));
-              }}
+              onBatchDelete={(ids) => stageAssets("delete", ids)}
             />
           </Animated.View>
         )}
@@ -650,6 +790,21 @@ const styles = StyleSheet.create({
   titleText: { color: Colors.text, fontWeight: "bold", fontSize: 14 },
   infoTextMain: { color: Colors.textSecondary, fontSize: 13, fontWeight: "500" },
   iconBtn: { padding: 5, position: "relative" },
+  // 左右兩側等寬，讓中間標題維持置中
+  topBarSide: { flexDirection: "row", alignItems: "center", width: 80 },
+  topBarRight: { justifyContent: "flex-end" },
+  actionDisabled: { opacity: 0.4 },
+  swipeHint: {
+    position: "absolute",
+    alignSelf: "center",
+    top: "45%",
+    paddingVertical: 8,
+    paddingHorizontal: 20,
+    borderRadius: 20,
+  },
+  deleteHint: { backgroundColor: Colors.danger },
+  keepHint: { backgroundColor: Colors.success },
+  swipeHintText: { color: Colors.text, fontSize: 18, fontWeight: "bold" },
   center: {
     flex: 1,
     justifyContent: "center",

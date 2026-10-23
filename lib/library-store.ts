@@ -56,7 +56,7 @@ function startWatching() {
   });
 }
 
-// 自己做的「保留」也會觸發相簿變動事件，短時間內忽略，避免每滑一張就重掃
+// 自己做的「保留」也會觸發相簿變動事件，短時間內忽略，避免保留完就重掃
 function ignoreOwnChanges() {
   ignoreChangesUntil = Date.now() + 2000;
 }
@@ -101,11 +101,14 @@ export function refreshLibrary({ force = false } = {}): Promise<void> {
   return inflight;
 }
 
-export async function keepAsset(assetId: string) {
+export async function keepAssets(assetIds: string[]) {
+  if (assetIds.length === 0) return;
   ignoreOwnChanges();
-  await addToOrganizedAlbum(assetId);
+  await addToOrganizedAlbum(assetIds);
   ignoreOwnChanges();
-  setState({ organizedIds: new Set(state.organizedIds).add(assetId) });
+  const organizedIds = new Set(state.organizedIds);
+  assetIds.forEach((id) => organizedIds.add(id));
+  setState({ organizedIds });
 }
 
 // 回傳是否真的刪除成功（使用者可能在系統確認框按取消）
