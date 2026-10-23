@@ -1,30 +1,28 @@
-// App 固定深色主題（app.json userInterfaceStyle: dark），色值沿用 iOS 深色系統色
+// App 固定深色主題（app.json userInterfaceStyle: dark），視覺方向「暗房」：
+// 暖黑底不讓照片偏色、琥珀＝保留／底片日期印、暗紅＝刪除
 export const Colors = {
-  background: "#000",
-  surface: "#1C1C1E", // 按鈕、分頁、底欄
-  surfaceRaised: "#2C2C2E", // 列表項目、徽章
-  surfaceMuted: "#3A3A3C",
-  border: "#333",
-  text: "#fff",
-  textSecondary: "#8E8E93",
-  textTertiary: "#48484A",
-  textFaint: "rgba(255,255,255,0.2)",
-  inverse: "#fff", // 白底元件（選中的分頁、主要按鈕）
-  onInverse: "#000",
-  accent: "#007AFF",
-  danger: "#FF3B30",
-  success: "#34C759",
+  background: "#0E0D0C",
+  surface: "#1A1816", // 按鈕、底片帶、底欄
+  surfaceRaised: "#262320", // 列表項目、徽章
+  surfaceMuted: "#34302B",
+  border: "#2E2A26",
+  text: "#EDE8DF",
+  textSecondary: "#9A948A",
+  textTertiary: "#5C564E",
+  textFaint: "rgba(237,232,223,0.2)",
+  inverse: "#EDE8DF", // 淺底元件（主要按鈕）
+  onInverse: "#0E0D0C",
+  accent: "#C8A15A", // 選取、底片日期印
+  keep: "#C8A15A",
+  onKeep: "#0E0D0C",
+  danger: "#D0583F",
   scrimLight: "rgba(0,0,0,0.3)", // 圖片上的遮罩
   scrim: "rgba(0,0,0,0.5)",
-  scrimStrong: "rgba(0,0,0,0.7)",
+  scrimStrong: "rgba(14,13,12,0.75)",
 };
 
-// 首頁「按月份」的色塊輪替
-export const MonthColors = [
-  "#A1CEDC",
-  "#9ED5B2",
-  "#F3E5AB",
-  "#D2B48C",
-  "#E8A1A2",
-  "#B39EB5",
-];
+// 數字專用窄體（app/_layout.tsx 載入）；中文維持系統字
+export const Fonts = {
+  number: "BarlowCondensed_500Medium",
+  numberBold: "BarlowCondensed_700Bold",
+};

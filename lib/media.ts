@@ -79,11 +79,6 @@ export function monthKey(timestamp: number) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
-export function monthLabel(key: string) {
-  const [year, month] = key.split("-");
-  return `${year}年 ${Number(month)}月`;
-}
-
 export function isWithinLastWeek(timestamp: number) {
   return timestamp > Date.now() - ONE_WEEK_MS;
 }

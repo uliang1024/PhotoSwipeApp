@@ -1,3 +1,4 @@
+import { FilmStrip } from "@/components/FilmStrip";
 import { PhotoGridModal } from "@/components/PhotoGridModal";
 import { TrashModal } from "@/components/TrashModal";
 import { ThemedText } from "@/components/themed-text";
@@ -39,7 +40,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { Colors } from "@/constants/theme";
+import { Colors, Fonts } from "@/constants/theme";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 // 不含安全區域的內容高度，實際高度會再加上 insets
@@ -190,10 +191,115 @@ const SwipeableCard = ({
           pointerEvents="none"
           style={[styles.swipeHint, styles.keepHint, keepHintStyle]}
         >
-          <ThemedText style={styles.swipeHintText}>保留</ThemedText>
+          <ThemedText style={[styles.swipeHintText, styles.keepHintText]}>
+            保留
+          </ThemedText>
         </Animated.View>
       </Animated.View>
     </GestureDetector>
+  );
+};
+
+function formatDateStamp(timestamp: number) {
+  const d = new Date(timestamp);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())}`;
+}
+
+// --- 整理完成摘要（這批滑完時取代卡片區）---
+const SUMMARY_FRAMES = 4;
+const SUMMARY_FRAME_HEIGHT =
+  ((SCREEN_WIDTH - 48 - 8 - 3 * (SUMMARY_FRAMES - 1)) / SUMMARY_FRAMES) *
+  (2 / 3);
+
+const SessionSummary = ({
+  topInset,
+  kept,
+  deletedCount,
+  trashCount,
+  onOpenTrash,
+  onDone,
+}: {
+  topInset: number;
+  kept: MediaLibrary.Asset[];
+  deletedCount: number;
+  trashCount: number;
+  onOpenTrash: () => void;
+  onDone: () => void;
+}) => {
+  const touched = kept.length + deletedCount + trashCount > 0;
+  const keptUris = kept
+    .filter((a) => a.mediaType === "photo")
+    .slice(-SUMMARY_FRAMES)
+    .map((a) => a.uri);
+  const figures = [
+    { label: "保留", value: kept.length, color: Colors.keep },
+    { label: "已刪除", value: deletedCount, color: Colors.text },
+    { label: "垃圾桶", value: trashCount, color: Colors.danger },
+  ];
+
+  return (
+    <View style={[styles.summary, { paddingTop: topInset }]}>
+      <ThemedText style={styles.summaryTitle}>
+        {touched ? "這批整理完了" : "這裡沒有未整理的項目"}
+      </ThemedText>
+      {touched && (
+        <>
+          {keptUris.length > 0 && (
+            <FilmStrip
+              uris={keptUris}
+              frames={SUMMARY_FRAMES}
+              frameHeight={SUMMARY_FRAME_HEIGHT}
+            />
+          )}
+          <View style={styles.summaryFigures}>
+            {figures.map((f, i) => (
+              <View
+                key={f.label}
+                style={[styles.summaryFigure, i > 0 && styles.summaryDivider]}
+              >
+                <ThemedText style={[styles.summaryValue, { color: f.color }]}>
+                  {f.value.toLocaleString()}
+                </ThemedText>
+                <ThemedText style={styles.summaryLabel}>{f.label}</ThemedText>
+              </View>
+            ))}
+          </View>
+          {kept.length > 0 && (
+            <ThemedText style={styles.summaryNote}>
+              保留的項目會在離開時移到「已整理」。
+            </ThemedText>
+          )}
+        </>
+      )}
+      {trashCount > 0 && (
+        <TouchableOpacity
+          style={[styles.summaryBtn, styles.summaryBtnPrimary]}
+          onPress={onOpenTrash}
+        >
+          <ThemedText style={styles.summaryBtnPrimaryText}>
+            檢查垃圾桶
+          </ThemedText>
+        </TouchableOpacity>
+      )}
+      <TouchableOpacity
+        style={[
+          styles.summaryBtn,
+          trashCount === 0 && styles.summaryBtnPrimary,
+        ]}
+        onPress={onDone}
+      >
+        <ThemedText
+          style={
+            trashCount === 0
+              ? styles.summaryBtnPrimaryText
+              : styles.summaryBtnText
+          }
+        >
+          回首頁
+        </ThemedText>
+      </TouchableOpacity>
+    </View>
   );
 };
 
@@ -223,6 +329,7 @@ export default function SwipeScreen() {
     MediaLibrary.Asset[]
   >([]);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  const [deletedCount, setDeletedCount] = useState(0); // 本次真正刪除的數量，給完成摘要用
   const flatListRef = React.useRef<FlatList>(null); // 用於控制跳轉
   const [isGridVisible, setIsGridVisible] = useState(false);
   // 1. 箭頭旋轉與視窗下推的 SharedValue
@@ -389,6 +496,7 @@ export default function SwipeScreen() {
     try {
       const deleted = await deleteAssets(ids);
       if (!deleted) return false;
+      setDeletedCount((n) => n + ids.length);
       setPendingDeleteAssets((prev) => prev.filter((a) => !ids.includes(a.id)));
       if (pendingDeleteAssets.length === ids.length) setIsTrashVisible(false);
       return true;
@@ -499,9 +607,14 @@ export default function SwipeScreen() {
               maxToRenderPerBatch={2}
             />
           ) : (
-            <View style={styles.center}>
-              <ThemedText>全部滑完囉！</ThemedText>
-            </View>
+            <SessionSummary
+              topInset={topHeight}
+              kept={pendingKeepAssets}
+              deletedCount={deletedCount}
+              trashCount={pendingDeleteAssets.length}
+              onOpenTrash={() => setIsTrashVisible(true)}
+              onDone={() => router.back()}
+            />
           )}
         </View>
 
@@ -582,19 +695,17 @@ export default function SwipeScreen() {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.fixedInfoContainer}>
-            <ThemedText style={styles.infoTextMain}>
-              {photos.length > 0
-                ? `${currentIndex + 1} / ${photos.length}`
-                : "0 / 0"}{" "}
-              ·{" "}
-              {photos[currentIndex]
-                ? new Date(
-                    photos[currentIndex].creationTime,
-                  ).toLocaleDateString()
-                : ""}
-            </ThemedText>
-          </View>
+          {photos[currentIndex] && (
+            <View style={styles.fixedInfoContainer}>
+              {/* 底片格號＋日期印 */}
+              <ThemedText style={styles.frameNumber}>
+                {String(currentIndex + 1).padStart(3, "0")} / {photos.length}
+              </ThemedText>
+              <ThemedText style={styles.dateStamp}>
+                {formatDateStamp(photos[currentIndex].creationTime)}
+              </ThemedText>
+            </View>
+          )}
         </View>
 
         {/* 3. BOTTOM SECTION */}
@@ -617,7 +728,11 @@ export default function SwipeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.actionItemHorizontal}
+            style={[
+              styles.actionItemHorizontal,
+              !photos[currentIndex] && styles.actionDisabled,
+            ]}
+            disabled={!photos[currentIndex]}
             onPress={() => {
               if (photos[currentIndex])
                 stageAssets("keep", [photos[currentIndex].id]);
@@ -626,17 +741,21 @@ export default function SwipeScreen() {
             <Ionicons
               name="checkmark-outline"
               size={20}
-              color={Colors.success}
+              color={Colors.keep}
             />
             <ThemedText
-              style={[styles.actionLabelHorizontal, { color: Colors.success }]}
+              style={[styles.actionLabelHorizontal, { color: Colors.keep }]}
             >
               保留{pendingKeepAssets.length > 0 ? ` ${pendingKeepAssets.length}` : ""}
             </ThemedText>
           </TouchableOpacity>
 
           <TouchableOpacity
-            style={styles.actionItemHorizontal}
+            style={[
+              styles.actionItemHorizontal,
+              !photos[currentIndex] && styles.actionDisabled,
+            ]}
+            disabled={!photos[currentIndex]}
             onPress={() => {
               if (photos[currentIndex])
                 stageAssets("delete", [photos[currentIndex].id]);
@@ -762,7 +881,25 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 15,
   },
-  fixedInfoContainer: { alignItems: "center" },
+  fixedInfoContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "baseline",
+    gap: 12,
+  },
+  frameNumber: {
+    fontFamily: Fonts.number,
+    fontSize: 15,
+    lineHeight: 20,
+    color: Colors.textSecondary,
+  },
+  dateStamp: {
+    fontFamily: Fonts.numberBold,
+    fontSize: 15,
+    lineHeight: 20,
+    letterSpacing: 1,
+    color: Colors.accent,
+  },
   badgeContainer: {
     position: "absolute",
     top: -4,
@@ -790,7 +927,6 @@ const styles = StyleSheet.create({
     lineHeight: 12, // 給予一個固定的行高，通常比字體大一點點
   },
   titleText: { color: Colors.text, fontWeight: "bold", fontSize: 14 },
-  infoTextMain: { color: Colors.textSecondary, fontSize: 13, fontWeight: "500" },
   iconBtn: { padding: 5, position: "relative" },
   // 左右兩側等寬，讓中間標題維持置中
   topBarSide: { flexDirection: "row", alignItems: "center", width: 80 },
@@ -805,12 +941,52 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   deleteHint: { backgroundColor: Colors.danger },
-  keepHint: { backgroundColor: Colors.success },
+  keepHint: { backgroundColor: Colors.keep },
+  keepHintText: { color: Colors.onKeep },
   swipeHintText: { color: Colors.text, fontSize: 18, fontWeight: "bold" },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: Colors.background,
+  },
+  summary: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 24,
+    gap: 20,
+  },
+  summaryTitle: {
+    fontSize: 22,
+    lineHeight: 30,
+    fontWeight: "bold",
+    color: Colors.text,
+  },
+  summaryFigures: { flexDirection: "row" },
+  summaryFigure: { flex: 1, paddingLeft: 12 },
+  summaryDivider: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: Colors.border,
+  },
+  summaryValue: {
+    fontFamily: Fonts.numberBold,
+    fontSize: 40,
+    lineHeight: 44,
+  },
+  summaryLabel: { fontSize: 13, color: Colors.textSecondary },
+  summaryNote: { fontSize: 13, color: Colors.textSecondary },
+  summaryBtn: {
+    height: 50,
+    borderRadius: 25,
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: Colors.surface,
+  },
+  summaryBtnPrimary: { backgroundColor: Colors.inverse },
+  summaryBtnText: { fontSize: 16, fontWeight: "600", color: Colors.text },
+  summaryBtnPrimaryText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: Colors.onInverse,
   },
 });
