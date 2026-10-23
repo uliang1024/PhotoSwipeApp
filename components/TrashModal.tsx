@@ -22,7 +22,7 @@ interface TrashModalProps {
   isVisible: boolean;
   onClose: () => void;
   pendingAssets: MediaLibrary.Asset[];
-  onConfirmDelete: (ids: string[]) => void;
+  onConfirmDelete: (ids: string[]) => Promise<boolean>;
   onRestore: (ids: string[]) => void;
 }
 
@@ -33,7 +33,10 @@ export const TrashModal = ({
   onConfirmDelete,
   onRestore,
 }: TrashModalProps) => {
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [rawSelectedIds, setSelectedIds] = useState<string[]>([]);
+  // 只認還在垃圾桶裡的項目，避免殘留已刪除/已恢復的 id
+  const pendingIdSet = new Set(pendingAssets.map((a) => a.id));
+  const selectedIds = rawSelectedIds.filter((id) => pendingIdSet.has(id));
 
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) =>
@@ -41,15 +44,15 @@ export const TrashModal = ({
     );
   };
 
-  const handleAction = (type: "delete" | "restore") => {
+  const handleAction = async (type: "delete" | "restore") => {
     const isAll = selectedIds.length === 0;
     const targetIds = isAll ? pendingAssets.map((a) => a.id) : selectedIds;
     const count = targetIds.length;
 
     if (type === "delete") {
       // 專業做法：刪除不跳 Alert，直接交給 iOS 系統處理
-      onConfirmDelete(targetIds);
-      setSelectedIds([]); // 清空選取狀態
+      // 在系統確認框按取消時保留選取
+      if (await onConfirmDelete(targetIds)) setSelectedIds([]);
     } else {
       // 恢復則保留詢問，避免使用者誤觸
       Alert.alert("確定恢復", `這將把 ${count} 個項目移回整理清單。`, [

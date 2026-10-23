@@ -224,7 +224,7 @@ export default function SwipeScreen() {
   const handleJumpToPhoto = (index: number) => {
     setCurrentIndex(index);
     flatListRef.current?.scrollToIndex({ index, animated: false });
-    toggleGrid(); // 選完自動縮回
+    // 縮回由 PhotoGridModal 選完後呼叫的 onClose 處理
   };
   const loadCategoryPhotos = useCallback(async () => {
     setLoading(true);
@@ -320,7 +320,15 @@ export default function SwipeScreen() {
     const assetsToRestore = pendingDeleteAssets.filter((a) =>
       ids.includes(a.id),
     );
-    setPhotos((prev) => [...assetsToRestore, ...prev]);
+    // 插在目前這張後面：畫面不跳動，往下滑就會看到恢復的項目
+    setPhotos((prev) => {
+      const insertAt = Math.min(currentIndex + 1, prev.length);
+      return [
+        ...prev.slice(0, insertAt),
+        ...assetsToRestore,
+        ...prev.slice(insertAt),
+      ];
+    });
     setPendingDeleteAssets((prev) => prev.filter((a) => !ids.includes(a.id)));
     if (pendingDeleteAssets.length === ids.length) setIsTrashVisible(false);
   };
