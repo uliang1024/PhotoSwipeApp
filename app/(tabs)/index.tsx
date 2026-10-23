@@ -34,10 +34,12 @@ interface MonthStats {
 function computeStats(
   assets: MediaLibrary.Asset[],
   organizedIds: Set<string>,
+  screenshotIds: Set<string>,
 ) {
   const monthsMap: Record<string, number> = {};
   let unorganized = 0;
   let video = 0;
+  let screenshot = 0;
   let weekly = 0;
   let weeklyFirstPhoto: string | null = null;
 
@@ -47,6 +49,7 @@ function computeStats(
     if (organizedIds.has(asset.id)) continue;
     unorganized++;
     if (asset.mediaType === "video") video++;
+    if (screenshotIds.has(asset.id)) screenshot++;
     if (isWithinLastWeek(asset.creationTime)) {
       weekly++;
       if (!weeklyFirstPhoto && asset.mediaType === "photo") {
@@ -67,7 +70,7 @@ function computeStats(
     }));
 
   return {
-    stats: { weekly, video, unorganized, weeklyFirstPhoto },
+    stats: { weekly, video, screenshot, unorganized, weeklyFirstPhoto },
     monthlyData,
   };
 }
@@ -81,8 +84,13 @@ export default function OrganizeScreen() {
   ); // Tab 狀態
 
   const { stats, monthlyData } = useMemo(
-    () => computeStats(library.assets, library.organizedIds),
-    [library.assets, library.organizedIds],
+    () =>
+      computeStats(
+        library.assets,
+        library.organizedIds,
+        library.screenshotIds,
+      ),
+    [library.assets, library.organizedIds, library.screenshotIds],
   );
   const allAlbums = useMemo(
     () =>
@@ -255,6 +263,21 @@ export default function OrganizeScreen() {
                     params: {
                       title: "未整理的影片",
                       type: "unorganized_video",
+                    },
+                  })
+                }
+              />
+              <CategoryItem
+                title="未整理的截圖"
+                count={stats.screenshot}
+                color={Colors.surfaceMuted}
+                isSmall
+                onPress={() =>
+                  router.push({
+                    pathname: "/swipe",
+                    params: {
+                      title: "未整理的截圖",
+                      type: "unorganized_screenshot",
                     },
                   })
                 }

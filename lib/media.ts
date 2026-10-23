@@ -1,4 +1,5 @@
 import * as MediaLibrary from "expo-media-library";
+import { Platform } from "react-native";
 
 export const ORGANIZED_ALBUM_TITLE = "已整理";
 const PAGE_SIZE = 1000;
@@ -47,6 +48,29 @@ export async function addToOrganizedAlbum(assetIds: string[]) {
   if (rest.length > 0) {
     await MediaLibrary.addAssetsToAlbumAsync(rest, album, false);
   }
+}
+
+// iOS 直接看 mediaSubtypes；Android 沒有 subtype，改抓名稱像截圖資料夾的相簿
+const SCREENSHOT_ALBUM_PATTERN = /screenshot|截圖|截屏|螢幕擷取/i;
+
+export async function getScreenshotIds(
+  assets: MediaLibrary.Asset[],
+  albums: MediaLibrary.Album[],
+): Promise<Set<string>> {
+  if (Platform.OS === "ios") {
+    return new Set(
+      assets
+        .filter((a) => a.mediaSubtypes?.includes("screenshot"))
+        .map((a) => a.id),
+    );
+  }
+  const screenshotAlbums = albums.filter((a) =>
+    SCREENSHOT_ALBUM_PATTERN.test(a.title),
+  );
+  const lists = await Promise.all(
+    screenshotAlbums.map((album) => fetchAllAssets({ album })),
+  );
+  return new Set(lists.flat().map((a) => a.id));
 }
 
 // 可排序的月份 key，例如 "2024-03"

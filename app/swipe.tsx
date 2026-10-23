@@ -275,7 +275,7 @@ export default function SwipeScreen() {
     try {
       // 一般情況直接命中首頁載好的快取，不重掃
       await refreshLibrary();
-      const { assets, organizedIds } = getLibrarySnapshot();
+      const { assets, organizedIds, screenshotIds } = getLibrarySnapshot();
       // asset 本身不帶所屬相簿，相簿模式只能另外抓該相簿
       const source =
         type === "album" && albumId
@@ -289,6 +289,8 @@ export default function SwipeScreen() {
             return isWithinLastWeek(asset.creationTime);
           case "month":
             return monthKey(asset.creationTime) === monthId;
+          case "unorganized_screenshot":
+            return screenshotIds.has(asset.id);
           case "unorganized_video":
             return asset.mediaType === "video";
           default:

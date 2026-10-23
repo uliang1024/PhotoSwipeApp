@@ -5,6 +5,7 @@ import {
   addToOrganizedAlbum,
   fetchAllAssets,
   getOrganizedAssetIds,
+  getScreenshotIds,
 } from "./media";
 
 // 全 App 共用一份相簿快取，避免每個頁面各自全量掃描
@@ -14,6 +15,7 @@ export interface LibraryState {
   status: LibraryStatus;
   assets: MediaLibrary.Asset[]; // 全部照片＋影片，新到舊
   organizedIds: Set<string>;
+  screenshotIds: Set<string>;
   albums: MediaLibrary.Album[];
 }
 
@@ -21,6 +23,7 @@ let state: LibraryState = {
   status: "idle",
   assets: [],
   organizedIds: new Set(),
+  screenshotIds: new Set(),
   albums: [],
 };
 let stale = true;
@@ -89,7 +92,8 @@ export function refreshLibrary({ force = false } = {}): Promise<void> {
         getOrganizedAssetIds(),
         fetchAllAssets({ sortBy: ["creationTime"] }),
       ]);
-      setState({ status: "ready", albums, organizedIds, assets });
+      const screenshotIds = await getScreenshotIds(assets, albums);
+      setState({ status: "ready", albums, organizedIds, assets, screenshotIds });
     } catch (error) {
       console.error("載入相簿失敗:", error);
       stale = true;
