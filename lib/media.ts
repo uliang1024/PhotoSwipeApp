@@ -73,6 +73,47 @@ export async function getScreenshotIds(
   return new Set(lists.flat().map((a) => a.id));
 }
 
+// iOS「個人收藏」智慧相簿（標題會依系統語言翻譯）；Android 沒有對應概念
+const FAVORITES_ALBUM_PATTERN = /^(favorites|個人收藏|喜好項目|最愛)$/i;
+
+export async function getFavoriteIds(
+  albums: MediaLibrary.Album[],
+): Promise<Set<string>> {
+  if (Platform.OS !== "ios") return new Set();
+  const album = albums.find(
+    (a) => a.type === "smartAlbum" && FAVORITES_ALBUM_PATTERN.test(a.title),
+  );
+  if (!album) return new Set();
+  const assets = await fetchAllAssets({ album });
+  return new Set(assets.map((a) => a.id));
+}
+
+// 連拍／相似照片：相鄰照片拍攝時間差在這之內就歸同一組
+const BURST_GAP_MS = 3000;
+
+// assets 需依拍攝時間排序；回傳 2 張以上的組（只看照片，影片會切斷分組）
+export function findBursts(assets: MediaLibrary.Asset[]): string[][] {
+  const groups: string[][] = [];
+  let current: string[] = [];
+  let prevTime = 0;
+  for (const asset of assets) {
+    const chained =
+      asset.mediaType === "photo" &&
+      current.length > 0 &&
+      Math.abs(asset.creationTime - prevTime) <= BURST_GAP_MS;
+    if (!chained) {
+      if (current.length > 1) groups.push(current);
+      current = [];
+    }
+    if (asset.mediaType === "photo") {
+      current.push(asset.id);
+      prevTime = asset.creationTime;
+    }
+  }
+  if (current.length > 1) groups.push(current);
+  return groups;
+}
+
 // 可排序的月份 key，例如 "2024-03"
 export function monthKey(timestamp: number) {
   const d = new Date(timestamp);

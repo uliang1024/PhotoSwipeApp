@@ -4,6 +4,7 @@ import { AppState } from "react-native";
 import {
   addToOrganizedAlbum,
   fetchAllAssets,
+  getFavoriteIds,
   getOrganizedAssetIds,
   getScreenshotIds,
 } from "./media";
@@ -14,7 +15,7 @@ export type LibraryStatus = "idle" | "loading" | "ready" | "denied" | "error";
 export interface LibraryState {
   status: LibraryStatus;
   assets: MediaLibrary.Asset[]; // 全部照片＋影片，新到舊
-  organizedIds: Set<string>;
+  organizedIds: Set<string>; // 「已整理」相簿＋iOS 個人收藏，都不算未整理
   screenshotIds: Set<string>;
   albums: MediaLibrary.Album[];
 }
@@ -92,7 +93,11 @@ export function refreshLibrary({ force = false } = {}): Promise<void> {
         getOrganizedAssetIds(),
         fetchAllAssets({ sortBy: ["creationTime"] }),
       ]);
-      const screenshotIds = await getScreenshotIds(assets, albums);
+      const [screenshotIds, favoriteIds] = await Promise.all([
+        getScreenshotIds(assets, albums),
+        getFavoriteIds(albums),
+      ]);
+      favoriteIds.forEach((id) => organizedIds.add(id));
       setState({ status: "ready", albums, organizedIds, assets, screenshotIds });
     } catch (error) {
       console.error("載入相簿失敗:", error);

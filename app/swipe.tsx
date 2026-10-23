@@ -15,9 +15,14 @@ import {
   keepAssets,
   refreshLibrary,
 } from "@/lib/library-store";
-import { fetchAllAssets, isWithinLastWeek, monthKey } from "@/lib/media";
+import {
+  fetchAllAssets,
+  findBursts,
+  isWithinLastWeek,
+  monthKey,
+} from "@/lib/media";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -71,10 +76,9 @@ const VideoCard = ({ uri, isActive }: { uri: string; isActive: boolean }) => {
 
 type SwipeAction = "keep" | "delete";
 
-// 一次操作（單張滑動或網格批次）記錄每張的原位置，供復原插回
+// 一次操作（單張滑動、網格批次、連拍只留一張）記錄每張的動作與原位置，供復原插回
 interface HistoryEntry {
-  action: SwipeAction;
-  items: { asset: MediaLibrary.Asset; index: number }[];
+  items: { asset: MediaLibrary.Asset; index: number; action: SwipeAction }[];
 }
 
 const SWIPE_DISTANCE = 120;
@@ -405,7 +409,12 @@ export default function SwipeScreen() {
         }
       });
 
-      setPhotos(filtered);
+      if (type === "burst") {
+        const burstIds = new Set(findBursts(filtered).flat());
+        setPhotos(filtered.filter((a) => burstIds.has(a.id)));
+      } else {
+        setPhotos(filtered);
+      }
     } catch (error) {
       console.error("載入失敗:", error);
     } finally {
@@ -417,26 +426,56 @@ export default function SwipeScreen() {
     loadCategoryPhotos();
   }, [loadCategoryPhotos]);
 
-  // 核心：照片飛走後從主列表移除，放進對應的暫存區並記錄歷史
-  const stageAssets = useCallback(
-    (action: SwipeAction, ids: string[]) => {
-      const idSet = new Set(ids);
-      const items = photos.flatMap((asset, index) =>
-        idSet.has(asset.id) ? [{ asset, index }] : [],
-      );
+  // 核心：照片飛走後從主列表移除，放進對應的暫存區，整批記成一筆歷史
+  const stage = useCallback(
+    (plan: Map<string, SwipeAction>) => {
+      const items = photos.flatMap((asset, index) => {
+        const action = plan.get(asset.id);
+        return action ? [{ asset, index, action }] : [];
+      });
       if (items.length === 0) return;
-      const assets = items.map((i) => i.asset);
-      const setPending =
-        action === "keep" ? setPendingKeepAssets : setPendingDeleteAssets;
-      setPending((prev) => [...prev, ...assets]);
-      setPhotos((prev) => prev.filter((p) => !idSet.has(p.id)));
-      setHistory((prev) => [...prev, { action, items }]);
-      if (action === "keep") {
+      const assetsOf = (action: SwipeAction) =>
+        items.filter((i) => i.action === action).map((i) => i.asset);
+      const keeps = assetsOf("keep");
+      const deletes = assetsOf("delete");
+      if (keeps.length) setPendingKeepAssets((prev) => [...prev, ...keeps]);
+      if (deletes.length)
+        setPendingDeleteAssets((prev) => [...prev, ...deletes]);
+      setPhotos((prev) => prev.filter((p) => !plan.has(p.id)));
+      setHistory((prev) => [...prev, { items }]);
+      if (keeps.length) {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     },
     [photos],
   );
+
+  const stageAssets = useCallback(
+    (action: SwipeAction, ids: string[]) =>
+      stage(new Map(ids.map((id) => [id, action]))),
+    [stage],
+  );
+
+  // 連拍：留目前這張，同組其他張丟垃圾桶
+  const bursts = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const group of findBursts(photos)) {
+      group.forEach((id) => map.set(id, group));
+    }
+    return map;
+  }, [photos]);
+  const currentBurst = photos[currentIndex]
+    ? bursts.get(photos[currentIndex].id)
+    : undefined;
+  const keepOnlyCurrent = () => {
+    if (!currentBurst) return;
+    const currentId = photos[currentIndex].id;
+    stage(
+      new Map(
+        currentBurst.map((id) => [id, id === currentId ? "keep" : "delete"]),
+      ),
+    );
+  };
 
   const handleSwipe = useCallback(
     (id: string, action: SwipeAction) => stageAssets(action, [id]),
@@ -445,20 +484,19 @@ export default function SwipeScreen() {
 
   // 復原最近一次仍有效的操作（已從垃圾桶恢復或已真正刪除的會跳過）
   const undoLast = () => {
+    const pendingIds = {
+      keep: new Set(pendingKeepAssets.map((a) => a.id)),
+      delete: new Set(pendingDeleteAssets.map((a) => a.id)),
+    };
     for (let h = history.length - 1; h >= 0; h--) {
-      const entry = history[h];
-      const pending =
-        entry.action === "keep" ? pendingKeepAssets : pendingDeleteAssets;
-      const pendingIds = new Set(pending.map((a) => a.id));
-      const items = entry.items
-        .filter((i) => pendingIds.has(i.asset.id))
+      const items = history[h].items
+        .filter((i) => pendingIds[i.action].has(i.asset.id))
         .sort((a, b) => a.index - b.index);
       if (items.length === 0) continue;
 
       const ids = new Set(items.map((i) => i.asset.id));
-      const setPending =
-        entry.action === "keep" ? setPendingKeepAssets : setPendingDeleteAssets;
-      setPending((prev) => prev.filter((a) => !ids.has(a.id)));
+      setPendingKeepAssets((prev) => prev.filter((a) => !ids.has(a.id)));
+      setPendingDeleteAssets((prev) => prev.filter((a) => !ids.has(a.id)));
       setHistory(history.slice(0, h));
 
       const next = [...photos];
@@ -708,6 +746,25 @@ export default function SwipeScreen() {
           )}
         </View>
 
+        {currentBurst && (
+          <View
+            style={[styles.burstBar, { bottom: bottomHeight + 12 }]}
+            pointerEvents="box-none"
+          >
+            <View style={styles.burstPill}>
+              <ThemedText style={styles.burstText}>
+                這組連拍 {currentBurst.length} 張
+              </ThemedText>
+              <TouchableOpacity
+                style={styles.burstBtn}
+                onPress={keepOnlyCurrent}
+              >
+                <ThemedText style={styles.burstBtnText}>只留這張</ThemedText>
+              </TouchableOpacity>
+            </View>
+          </View>
+        )}
+
         {/* 3. BOTTOM SECTION */}
         <View
           style={[
@@ -950,6 +1007,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     backgroundColor: Colors.background,
   },
+  burstBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    alignItems: "center",
+    zIndex: 25,
+  },
+  burstPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: Colors.scrimStrong,
+    borderRadius: 22,
+    paddingLeft: 16,
+    paddingRight: 4,
+    paddingVertical: 4,
+  },
+  burstText: { fontSize: 13, color: Colors.text },
+  burstBtn: {
+    backgroundColor: Colors.keep,
+    borderRadius: 18,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
+  burstBtnText: { fontSize: 13, fontWeight: "600", color: Colors.onKeep },
   summary: {
     flex: 1,
     justifyContent: "center",
