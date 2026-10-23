@@ -1,53 +1,29 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://reactnativeunistyles.vercel.app), etc.
- */
-
-import { Platform } from 'react-native';
-
-const tintColorLight = '#0a7ea4';
-const tintColorDark = '#fff';
-
+// App 固定深色主題（app.json userInterfaceStyle: dark），色值沿用 iOS 深色系統色
 export const Colors = {
-  light: {
-    text: '#11181C',
-    background: '#fff',
-    tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
-    tabIconSelected: tintColorLight,
-  },
-  dark: {
-    text: '#ECEDEE',
-    background: '#151718',
-    tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
-    tabIconSelected: tintColorDark,
-  },
+  background: "#000",
+  surface: "#1C1C1E", // 按鈕、分頁、底欄
+  surfaceRaised: "#2C2C2E", // 列表項目、徽章
+  surfaceMuted: "#3A3A3C",
+  border: "#333",
+  text: "#fff",
+  textSecondary: "#8E8E93",
+  textTertiary: "#48484A",
+  textFaint: "rgba(255,255,255,0.2)",
+  inverse: "#fff", // 白底元件（選中的分頁、主要按鈕）
+  onInverse: "#000",
+  accent: "#007AFF",
+  danger: "#FF3B30",
+  scrimLight: "rgba(0,0,0,0.3)", // 圖片上的遮罩
+  scrim: "rgba(0,0,0,0.5)",
+  scrimStrong: "rgba(0,0,0,0.7)",
 };
 
-export const Fonts = Platform.select({
-  ios: {
-    /** iOS `UIFontDescriptorSystemDesignDefault` */
-    sans: 'system-ui',
-    /** iOS `UIFontDescriptorSystemDesignSerif` */
-    serif: 'ui-serif',
-    /** iOS `UIFontDescriptorSystemDesignRounded` */
-    rounded: 'ui-rounded',
-    /** iOS `UIFontDescriptorSystemDesignMonospaced` */
-    mono: 'ui-monospace',
-  },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
-  },
-  web: {
-    sans: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
-    serif: "Georgia, 'Times New Roman', serif",
-    rounded: "'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif",
-    mono: "SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  },
-});
+// 首頁「按月份」的色塊輪替
+export const MonthColors = [
+  "#A1CEDC",
+  "#9ED5B2",
+  "#F3E5AB",
+  "#D2B48C",
+  "#E8A1A2",
+  "#B39EB5",
+];

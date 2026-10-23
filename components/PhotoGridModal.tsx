@@ -10,6 +10,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ThemedText } from "./themed-text";
+import { Colors } from "@/constants/theme";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 const COLUMN_COUNT = 4; // 網格一排 4 張
@@ -69,7 +70,7 @@ export const PhotoGridModal = ({
             <Ionicons
               name={isSelected ? "checkmark-circle" : "ellipse-outline"}
               size={22}
-              color={isSelected ? "#007AFF" : "#fff"}
+              color={isSelected ? Colors.accent : Colors.text}
             />
           </View>
         )}
@@ -83,7 +84,7 @@ export const PhotoGridModal = ({
       {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={onClose} style={styles.iconBtn}>
-          <Ionicons name="chevron-up" size={28} color="#fff" />
+          <Ionicons name="chevron-up" size={28} color={Colors.text} />
         </TouchableOpacity>
 
         <View style={styles.titleContainer}>
@@ -134,7 +135,7 @@ export const PhotoGridModal = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
     width: SCREEN_WIDTH, // 確保寬度正確
     height: SCREEN_HEIGHT, // 確保高度正確
   },
@@ -146,9 +147,9 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   titleContainer: { alignItems: "center" },
-  titleText: { color: "#fff", fontWeight: "bold", fontSize: 17 },
-  subText: { color: "#8E8E93", fontSize: 12, marginTop: 2 },
-  selectActionText: { color: "#fff", fontSize: 16, fontWeight: "500" },
+  titleText: { color: Colors.text, fontWeight: "bold", fontSize: 17 },
+  subText: { color: Colors.textSecondary, fontSize: 12, marginTop: 2 },
+  selectActionText: { color: Colors.text, fontSize: 16, fontWeight: "500" },
   iconBtn: { padding: 5 },
   gridContent: { paddingTop: 10 },
   itemContainer: { width: ITEM_SIZE, height: ITEM_SIZE, padding: 1 },
@@ -157,7 +158,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 5,
     bottom: 5,
-    shadowColor: "#000",
+    shadowColor: Colors.background,
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.5,
     shadowRadius: 2,
@@ -167,16 +168,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
-    backgroundColor: "#1C1C1E",
+    backgroundColor: Colors.surface,
     borderTopWidth: 0.5,
-    borderTopColor: "#333",
+    borderTopColor: Colors.border,
   },
   footerInfoText: {
-    color: "#8E8E93",
+    color: Colors.textSecondary,
     fontSize: 15,
     flex: 2,
     textAlign: "center",
   },
   deleteAction: { flex: 1, alignItems: "flex-end" },
-  deleteText: { color: "#fff", fontSize: 16, fontWeight: "600" },
+  deleteText: { color: Colors.text, fontSize: 16, fontWeight: "600" },
 });

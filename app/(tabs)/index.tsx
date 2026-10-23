@@ -22,6 +22,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Colors, MonthColors } from "@/constants/theme";
 
 interface MonthStats {
   title: string;
@@ -29,15 +30,6 @@ interface MonthStats {
   color: string;
   monthId: string;
 }
-
-const MONTH_COLORS = [
-  "#A1CEDC",
-  "#9ED5B2",
-  "#F3E5AB",
-  "#D2B48C",
-  "#E8A1A2",
-  "#B39EB5",
-];
 
 function computeStats(
   assets: MediaLibrary.Asset[],
@@ -70,7 +62,7 @@ function computeStats(
     .map((key, index) => ({
       title: monthLabel(key),
       count: monthsMap[key],
-      color: MONTH_COLORS[index % MONTH_COLORS.length],
+      color: MonthColors[index % MonthColors.length],
       monthId: key,
     }));
 
@@ -110,7 +102,7 @@ export default function OrganizeScreen() {
   if (library.status === "idle" || library.status === "loading")
     return (
       <ThemedView style={styles.center}>
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={Colors.text} />
       </ThemedView>
     );
 
@@ -160,7 +152,7 @@ export default function OrganizeScreen() {
             style={styles.infoBtn}
             onPress={() => refreshLibrary({ force: true })}
           >
-            <Ionicons name="refresh-circle-outline" size={28} color="#fff" />
+            <Ionicons name="refresh-circle-outline" size={28} color={Colors.text} />
           </TouchableOpacity>
         </View>
 
@@ -228,7 +220,7 @@ export default function OrganizeScreen() {
                 <View
                   style={[
                     StyleSheet.absoluteFill,
-                    { backgroundColor: "#2C2C2E" },
+                    { backgroundColor: Colors.surfaceRaised },
                   ]}
                 />
               )}
@@ -243,7 +235,7 @@ export default function OrganizeScreen() {
               <CategoryItem
                 title="所有未整理"
                 count={stats.unorganized}
-                color="#3A3A3C"
+                color={Colors.surfaceMuted}
                 isSmall
                 onPress={() =>
                   router.push({
@@ -255,7 +247,7 @@ export default function OrganizeScreen() {
               <CategoryItem
                 title="未整理的影片"
                 count={stats.video}
-                color="#3A3A3C"
+                color={Colors.surfaceMuted}
                 isSmall
                 onPress={() =>
                   router.push({
@@ -302,7 +294,7 @@ export default function OrganizeScreen() {
                 key={album.id}
                 title={album.title}
                 count={album.assetCount}
-                color="#2C2C2E"
+                color={Colors.surfaceRaised}
                 isSmall
                 onPress={() => {
                   // 跳轉至滑動頁面，並帶入相簿 ID
@@ -328,17 +320,17 @@ export default function OrganizeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
   },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
   },
-  permissionText: { color: "#fff", marginBottom: 16 },
+  permissionText: { color: Colors.text, marginBottom: 16 },
   permissionBtn: {
-    backgroundColor: "#fff",
+    backgroundColor: Colors.inverse,
     paddingVertical: 10,
     paddingHorizontal: 24,
     borderRadius: 20,
@@ -350,28 +342,28 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: 20,
   },
-  headerTitle: { fontSize: 32, fontWeight: "bold", color: "#fff" },
+  headerTitle: { fontSize: 32, fontWeight: "bold", color: Colors.text },
   infoBtn: { padding: 5 },
   topTabs: { flexDirection: "row", marginBottom: 25 },
   topTabActive: {
-    backgroundColor: "#fff",
+    backgroundColor: Colors.inverse,
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderRadius: 20,
     marginRight: 10,
   },
   topTabInactive: {
-    backgroundColor: "#1C1C1E",
+    backgroundColor: Colors.surface,
     paddingVertical: 8,
     paddingHorizontal: 20,
     borderRadius: 20,
   },
-  topTabTextActive: { color: "#000", fontWeight: "bold" },
-  topTabTextInactive: { color: "#8E8E93" },
+  topTabTextActive: { color: Colors.onInverse, fontWeight: "bold" },
+  topTabTextInactive: { color: Colors.textSecondary },
   sectionTitle: {
     fontSize: 22,
     fontWeight: "bold",
-    color: "#fff",
+    color: Colors.text,
     marginBottom: 15,
   },
   weeklyBanner: {
@@ -379,15 +371,15 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: "hidden", // 確保圖片不超出圓角
     marginBottom: 20,
-    backgroundColor: "#1C1C1E",
+    backgroundColor: Colors.surface,
   },
   bannerOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.3)", // 圖片遮罩
+    backgroundColor: Colors.scrimLight, // 圖片遮罩
     justifyContent: "flex-end",
     padding: 20,
   },
-  bannerText: { color: "#fff", fontSize: 20, fontWeight: "bold" },
+  bannerText: { color: Colors.text, fontSize: 20, fontWeight: "bold" },
   listContainer: {
     width: "100%",
     marginBottom: 10,

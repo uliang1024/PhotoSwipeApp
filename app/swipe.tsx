@@ -39,6 +39,7 @@ import Animated, {
   withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Colors } from "@/constants/theme";
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 // 不含安全區域的內容高度，實際高度會再加上 insets
@@ -341,7 +342,7 @@ export default function SwipeScreen() {
   if (loading)
     return (
       <ThemedView style={styles.center}>
-        <ActivityIndicator color="#fff" />
+        <ActivityIndicator color={Colors.text} />
       </ThemedView>
     );
 
@@ -397,7 +398,7 @@ export default function SwipeScreen() {
               onPress={() => router.back()}
               style={styles.iconBtn}
             >
-              <Ionicons name="close" size={28} color="#fff" />
+              <Ionicons name="close" size={28} color={Colors.text} />
             </TouchableOpacity>
             {/* 修改中間標題：點擊開啟網格 */}
             <TouchableOpacity style={styles.titleBadge} onPress={toggleGrid}>
@@ -406,7 +407,7 @@ export default function SwipeScreen() {
                   {title || "所有照片"}
                 </ThemedText>
                 <Animated.View style={[arrowStyle, { marginLeft: 4 }]}>
-                  <Ionicons name="chevron-down" size={16} color="#fff" />
+                  <Ionicons name="chevron-down" size={16} color={Colors.text} />
                 </Animated.View>
               </View>
             </TouchableOpacity>
@@ -426,7 +427,7 @@ export default function SwipeScreen() {
                 }
               }}
             >
-              <Ionicons name="trash-outline" size={24} color="#fff" />
+              <Ionicons name="trash-outline" size={24} color={Colors.text} />
               {pendingDeleteAssets.length > 0 && (
                 <View style={styles.badgeContainer}>
                   <ThemedText style={styles.badgeText}>
@@ -475,7 +476,7 @@ export default function SwipeScreen() {
               )
             }
           >
-            <Ionicons name="help-circle-outline" size={20} color="#fff" />
+            <Ionicons name="help-circle-outline" size={20} color={Colors.text} />
             <ThemedText style={styles.actionLabelHorizontal}>幫助</ThemedText>
           </TouchableOpacity>
 
@@ -486,7 +487,7 @@ export default function SwipeScreen() {
                 handleKeepPhoto(photos[currentIndex].id);
             }}
           >
-            <Ionicons name="download-outline" size={20} color="#fff" />
+            <Ionicons name="download-outline" size={20} color={Colors.text} />
             <ThemedText style={styles.actionLabelHorizontal}>保留</ThemedText>
           </TouchableOpacity>
 
@@ -497,9 +498,9 @@ export default function SwipeScreen() {
                 handleRemovePhoto(photos[currentIndex].id);
             }}
           >
-            <Ionicons name="close-outline" size={20} color="red" />
+            <Ionicons name="close-outline" size={20} color={Colors.danger} />
             <ThemedText
-              style={[styles.actionLabelHorizontal, { color: "red" }]}
+              style={[styles.actionLabelHorizontal, { color: Colors.danger }]}
             >
               刪除
             </ThemedText>
@@ -541,11 +542,11 @@ export default function SwipeScreen() {
 const styles = StyleSheet.create({
   customModalWrapper: {
     zIndex: 100, // 確保在最上層
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
   },
   // 記得檢查 titleBadge 的樣式，確保 row 排列
   titleBadge: {
-    backgroundColor: "#333",
+    backgroundColor: Colors.surfaceRaised,
     paddingVertical: 4,
     paddingHorizontal: 12,
     borderRadius: 20,
@@ -555,7 +556,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
     zIndex: 30,
     paddingHorizontal: 10,
     // 移除原本較大的 paddingBottom，讓位置更精確
@@ -566,7 +567,7 @@ const styles = StyleSheet.create({
     flexDirection: "row", // 關鍵：改為左右排列
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#1C1C1E", // 加上微弱背景色讓按鈕感更強（可選）
+    backgroundColor: Colors.surface, // 加上微弱背景色讓按鈕感更強（可選）
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 20, // 圓角膠囊感
@@ -575,14 +576,14 @@ const styles = StyleSheet.create({
   },
 
   actionLabelHorizontal: {
-    color: "#fff",
+    color: Colors.text,
     fontSize: 13, // 稍微調大一點點，因為空間變充裕了
     marginLeft: 6, // 圖標與文字的間距
     fontWeight: "600",
   },
   container: {
     flex: 1,
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
   },
 
   // 1. 頂部區塊保持絕對定位，但我們給它一個半透明黑背景或純黑，
@@ -593,7 +594,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     zIndex: 20, // 提升 zIndex 確保按鈕可點擊
-    backgroundColor: "rgba(0,0,0,0.7)", // 稍微給一點背景，視覺更高級
+    backgroundColor: Colors.scrimStrong, // 稍微給一點背景，視覺更高級
   },
 
   middleSectionFull: {
@@ -624,7 +625,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: -4,
     right: -4,
-    backgroundColor: "red",
+    backgroundColor: Colors.danger,
     borderRadius: 10, // 圓角
     minWidth: 18,
     height: 18,
@@ -634,10 +635,10 @@ const styles = StyleSheet.create({
     // ---------------
     paddingHorizontal: 2, // 稍微縮減
     borderWidth: 1.5,
-    borderColor: "#000",
+    borderColor: Colors.background,
   },
   badgeText: {
-    color: "#fff",
+    color: Colors.text,
     fontSize: 10,
     fontWeight: "bold",
     // --- 消除預設偏移關鍵 ---
@@ -646,13 +647,13 @@ const styles = StyleSheet.create({
     textAlignVertical: "center", // 針對 Android 的文字垂直居中
     lineHeight: 12, // 給予一個固定的行高，通常比字體大一點點
   },
-  titleText: { color: "#fff", fontWeight: "bold", fontSize: 14 },
-  infoTextMain: { color: "#8E8E93", fontSize: 13, fontWeight: "500" },
+  titleText: { color: Colors.text, fontWeight: "bold", fontSize: 14 },
+  infoTextMain: { color: Colors.textSecondary, fontSize: 13, fontWeight: "500" },
   iconBtn: { padding: 5, position: "relative" },
   center: {
     flex: 1,
     justifyContent: "center",
     alignItems: "center",
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
   },
 });

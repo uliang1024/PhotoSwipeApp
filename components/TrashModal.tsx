@@ -13,6 +13,7 @@ import {
 } from "react-native";
 import { ThemedText } from "./themed-text";
 import { ThemedView } from "./themed-view";
+import { Colors } from "@/constants/theme";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const COLUMN_COUNT = 3;
@@ -79,12 +80,12 @@ export const TrashModal = ({
         <Image source={{ uri: item.uri }} style={styles.thumbnail} />
         {item.mediaType === "video" && (
           <View style={styles.videoBadge}>
-            <Ionicons name="play" size={12} color="#fff" />
+            <Ionicons name="play" size={12} color={Colors.text} />
           </View>
         )}
         {isSelected && (
           <View style={styles.selectedOverlay}>
-            <Ionicons name="checkmark-circle" size={24} color="#007AFF" />
+            <Ionicons name="checkmark-circle" size={24} color={Colors.accent} />
           </View>
         )}
       </TouchableOpacity>
@@ -102,7 +103,7 @@ export const TrashModal = ({
         <ThemedView style={styles.contentContainer}>
           <View style={styles.header}>
             <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Ionicons name="close" size={28} color="#fff" />
+              <Ionicons name="close" size={28} color={Colors.text} />
             </TouchableOpacity>
             <View style={styles.headerTextContainer}>
               <ThemedText style={styles.headerTitle}>垃圾桶</ThemedText>
@@ -153,21 +154,21 @@ export const TrashModal = ({
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
+    backgroundColor: Colors.scrim,
     justifyContent: "flex-end",
   },
   contentContainer: {
     height: "90%",
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    backgroundColor: "#000",
+    backgroundColor: Colors.background,
   },
   header: {
     flexDirection: "row",
     alignItems: "center",
     padding: 20,
     borderBottomWidth: 0.5,
-    borderBottomColor: "#333",
+    borderBottomColor: Colors.border,
   },
   headerTextContainer: {
     flex: 1,
@@ -176,11 +177,11 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 18,
     fontWeight: "bold",
-    color: "#fff",
+    color: Colors.text,
   },
   headerSub: {
     fontSize: 12,
-    color: "#8E8E93",
+    color: Colors.textSecondary,
     marginTop: 4,
   },
   closeBtn: {
@@ -202,17 +203,17 @@ const styles = StyleSheet.create({
     position: "absolute",
     bottom: 5,
     right: 5,
-    backgroundColor: "rgba(0,0,0,0.6)",
+    backgroundColor: Colors.scrim,
     borderRadius: 10,
     padding: 2,
   },
   selectedOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.3)",
+    backgroundColor: Colors.scrimLight,
     justifyContent: "center",
     alignItems: "center",
     borderWidth: 2,
-    borderColor: "#007AFF",
+    borderColor: Colors.accent,
   },
   footer: {
     padding: 20,
@@ -227,14 +228,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   deleteBtn: {
-    backgroundColor: "#FF3B30",
+    backgroundColor: Colors.danger,
   },
   restoreBtn: {
-    backgroundColor: "#2C2C2E",
+    backgroundColor: Colors.surfaceRaised,
   },
   btnText: {
     fontSize: 16,
     fontWeight: "600",
-    color: "#fff",
+    color: Colors.text,
   },
 });

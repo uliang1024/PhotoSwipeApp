@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { StyleSheet, TouchableOpacity, View } from "react-native";
 import { ThemedText } from "./themed-text";
+import { Colors } from "@/constants/theme";
 
 interface Props {
   title: string;
@@ -13,7 +14,7 @@ interface Props {
 export function CategoryItem({
   title,
   count,
-  color = "#2C2C2E",
+  color = Colors.surfaceRaised,
   onPress,
   isSmall,
 }: Props) {
@@ -42,7 +43,7 @@ export function CategoryItem({
         <Ionicons
           name="chevron-forward"
           size={isSmall ? 14 : 18}
-          color="#48484A"
+          color={Colors.textTertiary}
         />
       </View>
     </TouchableOpacity>
@@ -73,7 +74,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: "rgba(255,255,255,0.2)",
+    backgroundColor: Colors.textFaint,
     marginRight: 12,
   },
   dotSmall: {
@@ -84,7 +85,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: "600",
-    color: "#fff",
+    color: Colors.text,
   },
   titleSmall: {
     fontSize: 14, // 【字體變小】
@@ -95,7 +96,7 @@ const styles = StyleSheet.create({
   },
   count: {
     fontSize: 18,
-    color: "#8E8E93",
+    color: Colors.textSecondary,
     fontWeight: "500",
     marginRight: 8,
   },
