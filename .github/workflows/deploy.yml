@@ -16,13 +16,14 @@ jobs:
       - name: ⚙️ Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: "npm"
 
       - name: ⚙️ Setup EAS
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
+          packager: npm # 預設 yarn 全域安裝在新 runner 上會失敗
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: 📦 Install dependencies
