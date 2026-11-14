@@ -7,6 +7,7 @@ import {
     Dimensions,
     FlatList,
     Modal,
+    Platform,
     StyleSheet,
     TouchableOpacity,
     View,
@@ -51,9 +52,19 @@ export const TrashModal = ({
     const count = targetIds.length;
 
     if (type === "delete") {
-      // 專業做法：刪除不跳 Alert，直接交給 iOS 系統處理
-      // 在系統確認框按取消時保留選取
-      if (await onConfirmDelete(targetIds)) setSelectedIds([]);
+      // 有系統確認框（iOS、Android 11+）就直接交給系統，在確認框按取消時保留選取
+      const run = async () => {
+        if (await onConfirmDelete(targetIds)) setSelectedIds([]);
+      };
+      // Android 10 以下沒有系統確認框，會直接刪，自己問一次
+      if (Platform.OS === "android" && Number(Platform.Version) < 30) {
+        Alert.alert("確定刪除", `${count} 個項目會從裝置永久刪除。`, [
+          { text: "取消", style: "cancel" },
+          { text: "刪除", style: "destructive", onPress: run },
+        ]);
+      } else {
+        await run();
+      }
     } else {
       // 恢復則保留詢問，避免使用者誤觸
       Alert.alert("確定恢復", `這將把 ${count} 個項目移回整理清單。`, [

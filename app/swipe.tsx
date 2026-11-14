@@ -54,6 +54,8 @@ const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get("window");
 // 不含安全區域的內容高度，實際高度會再加上 insets
 const TOP_BAR_HEIGHT = 60;
 const BOTTOM_BAR_HEIGHT = 70;
+// 「只留這張」超過這個張數先確認
+const BURST_CONFIRM_THRESHOLD = 5;
 const VideoCard = ({ uri, isActive }: { uri: string; isActive: boolean }) => {
   const player = useVideoPlayer(uri, (player) => {
     player.loop = true;
@@ -335,6 +337,10 @@ export default function SwipeScreen() {
   const [pendingKeepAssets, setPendingKeepAssets] = useState<
     MediaLibrary.Asset[]
   >([]);
+  // 已寫入「已整理」的，給完成摘要用（寫入後 pendingKeepAssets 會清空）
+  const [committedKeeps, setCommittedKeeps] = useState<MediaLibrary.Asset[]>(
+    [],
+  );
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [deletedCount, setDeletedCount] = useState(0); // 本次真正刪除的數量，給完成摘要用
   const flatListRef = React.useRef<FlatList>(null); // 用於控制跳轉
@@ -478,11 +484,21 @@ export default function SwipeScreen() {
     : undefined;
   const keepOnlyCurrent = () => {
     if (!currentBurst) return;
+    const group = currentBurst;
     const currentId = photos[currentIndex].id;
-    stage(
-      new Map(
-        currentBurst.map((id) => [id, id === currentId ? "keep" : "delete"]),
-      ),
+    const run = () =>
+      stage(
+        new Map(group.map((id) => [id, id === currentId ? "keep" : "delete"])),
+      );
+    // 時間鏈式分組可能串成一大串，量大時先確認
+    if (group.length <= BURST_CONFIRM_THRESHOLD) return run();
+    Alert.alert(
+      `這組有 ${group.length} 張`,
+      `其他 ${group.length - 1} 張會放進垃圾桶（可恢復）。`,
+      [
+        { text: "取消", style: "cancel" },
+        { text: "只留這張", style: "destructive", onPress: run },
+      ],
     );
   };
 
@@ -492,11 +508,17 @@ export default function SwipeScreen() {
   );
 
   // 復原最近一次仍有效的操作（已從垃圾桶恢復或已真正刪除的會跳過）
-  const undoLast = () => {
-    const pendingIds = {
+  const pendingIds = useMemo(
+    () => ({
       keep: new Set(pendingKeepAssets.map((a) => a.id)),
       delete: new Set(pendingDeleteAssets.map((a) => a.id)),
-    };
+    }),
+    [pendingKeepAssets, pendingDeleteAssets],
+  );
+  const canUndo = history.some((h) =>
+    h.items.some((i) => pendingIds[i.action].has(i.asset.id)),
+  );
+  const undoLast = () => {
     for (let h = history.length - 1; h >= 0; h--) {
       const items = history[h].items
         .filter((i) => pendingIds[i.action].has(i.asset.id))
@@ -529,14 +551,32 @@ export default function SwipeScreen() {
     if (pendingKeepAssets.length === 0) return true;
     try {
       await keepAssets(pendingKeepAssets.map((a) => a.id));
+      setCommittedKeeps((prev) => [...prev, ...pendingKeepAssets]);
       setPendingKeepAssets([]);
       return true;
     } catch (error) {
       console.error("歸類失敗:", error);
-      Alert.alert("歸類失敗", "無法將照片/影片移入「已整理」相簿");
       return false;
     }
   };
+
+  // 寫入失敗時讓使用者選：留下重試，或放棄保留直接離開
+  const askAbandonKeeps = () =>
+    new Promise<boolean>((resolve) =>
+      Alert.alert(
+        "歸類失敗",
+        `無法將 ${pendingKeepAssets.length} 張移入「已整理」相簿。放棄的話它們會留在未整理。`,
+        [
+          { text: "留在這裡", style: "cancel", onPress: () => resolve(false) },
+          {
+            text: "放棄保留，離開",
+            style: "destructive",
+            onPress: () => resolve(true),
+          },
+        ],
+        { cancelable: true, onDismiss: () => resolve(false) },
+      ),
+    );
 
   // 確定刪除：調用 MediaLibrary API 真正刪除設備照片
   const confirmFinalDelete = async (ids: string[]) => {
@@ -569,7 +609,7 @@ export default function SwipeScreen() {
       if (leavingRef.current) return;
       leavingRef.current = true;
       try {
-        if (!(await commitKeeps())) return;
+        if (!(await commitKeeps()) && !(await askAbandonKeeps())) return;
         if (
           withDelete &&
           !(await confirmFinalDelete(pendingDeleteAssets.map((a) => a.id)))
@@ -672,7 +712,7 @@ export default function SwipeScreen() {
           ) : (
             <SessionSummary
               topInset={topHeight}
-              kept={pendingKeepAssets}
+              kept={[...committedKeeps, ...pendingKeepAssets]}
               deletedCount={deletedCount}
               trashCount={pendingDeleteAssets.length}
               onOpenTrash={() => setIsTrashVisible(true)}
@@ -800,9 +840,9 @@ export default function SwipeScreen() {
           <TouchableOpacity
             style={[
               styles.actionItemHorizontal,
-              history.length === 0 && styles.actionDisabled,
+              !canUndo && styles.actionDisabled,
             ]}
-            disabled={history.length === 0}
+            disabled={!canUndo}
             onPress={undoLast}
           >
             <Ionicons name="arrow-undo-outline" size={20} color={Colors.text} />

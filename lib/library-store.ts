@@ -1,6 +1,6 @@
 import * as MediaLibrary from "expo-media-library";
 import { useSyncExternalStore } from "react";
-import { AppState } from "react-native";
+import { AppState, Platform } from "react-native";
 import {
   addToOrganizedAlbum,
   fetchAllAssets,
@@ -118,12 +118,23 @@ export async function keepAssets(assetIds: string[]) {
   const organizedIds = new Set(state.organizedIds);
   assetIds.forEach((id) => organizedIds.add(id));
   setState({ organizedIds });
+  // Android 移動檔案後 id 可能改變，快取裡的舊 id 不可信，下次重掃
+  if (Platform.OS === "android") stale = true;
 }
+
+// iOS 使用者在系統確認框按取消是 reject（NSUserCancelledError／PHPhotosErrorUserCancelled，都是 3072）
+const USER_CANCELLED = /3072/;
 
 // 回傳是否真的刪除成功（使用者可能在系統確認框按取消）
 // 刪除會影響各相簿數量，不忽略變動事件，讓首頁下次重掃
 export async function deleteAssets(ids: string[]) {
-  const deleted = await MediaLibrary.deleteAssetsAsync(ids);
+  let deleted: boolean;
+  try {
+    deleted = await MediaLibrary.deleteAssetsAsync(ids);
+  } catch (error) {
+    if (USER_CANCELLED.test(String((error as Error)?.message))) return false;
+    throw error;
+  }
   if (deleted) {
     const removed = new Set(ids);
     setState({ assets: state.assets.filter((a) => !removed.has(a.id)) });
