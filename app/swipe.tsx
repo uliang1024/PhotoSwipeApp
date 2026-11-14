@@ -24,6 +24,13 @@ import {
   isWithinLastWeek,
   monthKey,
 } from "@/lib/media";
+import {
+  findUndo,
+  planStage,
+  reinsert,
+  type HistoryEntry,
+  type SwipeAction,
+} from "@/lib/swipe-history";
 import { useVideoPlayer, VideoView } from "expo-video";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
@@ -78,13 +85,6 @@ const VideoCard = ({ uri, isActive }: { uri: string; isActive: boolean }) => {
     />
   );
 };
-
-type SwipeAction = "keep" | "delete";
-
-// 一次操作（單張滑動、網格批次、連拍只留一張）記錄每張的動作與原位置，供復原插回
-interface HistoryEntry {
-  items: { asset: MediaLibrary.Asset; index: number; action: SwipeAction }[];
-}
 
 const SWIPE_DISTANCE = 120;
 const SWIPE_VELOCITY = 500;
@@ -442,13 +442,10 @@ export default function SwipeScreen() {
   // 核心：照片飛走後從主列表移除，放進對應的暫存區，整批記成一筆歷史
   const stage = useCallback(
     (plan: Map<string, SwipeAction>) => {
-      const items = photosRef.current.flatMap((asset, index) => {
-        const action = plan.get(asset.id);
-        return action ? [{ asset, index, action }] : [];
-      });
+      const { items, remaining } = planStage(photosRef.current, plan);
       if (items.length === 0) return;
       // 同一輪 render 前再次呼叫也不會重複 stage
-      photosRef.current = photosRef.current.filter((p) => !plan.has(p.id));
+      photosRef.current = remaining;
       const assetsOf = (action: SwipeAction) =>
         items.filter((i) => i.action === action).map((i) => i.asset);
       const keeps = assetsOf("keep");
@@ -515,35 +512,30 @@ export default function SwipeScreen() {
     }),
     [pendingKeepAssets, pendingDeleteAssets],
   );
-  const canUndo = history.some((h) =>
-    h.items.some((i) => pendingIds[i.action].has(i.asset.id)),
+  const undoTarget = useMemo(
+    () => findUndo(history, pendingIds),
+    [history, pendingIds],
   );
+  const canUndo = undoTarget !== null;
   const undoLast = () => {
-    for (let h = history.length - 1; h >= 0; h--) {
-      const items = history[h].items
-        .filter((i) => pendingIds[i.action].has(i.asset.id))
-        .sort((a, b) => a.index - b.index);
-      if (items.length === 0) continue;
-
-      const ids = new Set(items.map((i) => i.asset.id));
-      setPendingKeepAssets((prev) => prev.filter((a) => !ids.has(a.id)));
-      setPendingDeleteAssets((prev) => prev.filter((a) => !ids.has(a.id)));
-      setHistory(history.slice(0, h));
-
-      const next = [...photos];
-      for (const { asset, index } of items) {
-        next.splice(Math.min(index, next.length), 0, asset);
-      }
-      setPhotos(next);
-      const target = Math.min(items[0].index, next.length - 1);
-      setCurrentIndex(target);
-      requestAnimationFrame(() =>
-        flatListRef.current?.scrollToIndex({ index: target, animated: false }),
-      );
-      Haptics.selectionAsync();
+    if (!undoTarget) {
+      setHistory([]);
       return;
     }
-    setHistory([]);
+    const { at, items } = undoTarget;
+    const ids = new Set(items.map((i) => i.asset.id));
+    setPendingKeepAssets((prev) => prev.filter((a) => !ids.has(a.id)));
+    setPendingDeleteAssets((prev) => prev.filter((a) => !ids.has(a.id)));
+    setHistory(history.slice(0, at));
+
+    const next = reinsert(photos, items);
+    setPhotos(next);
+    const target = Math.min(items[0].index, next.length - 1);
+    setCurrentIndex(target);
+    requestAnimationFrame(() =>
+      flatListRef.current?.scrollToIndex({ index: target, animated: false }),
+    );
+    Haptics.selectionAsync();
   };
 
   // 把暫存的保留寫入「已整理」相簿
