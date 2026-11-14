@@ -9,7 +9,7 @@ import {
   monthKey,
   ORGANIZED_ALBUM_TITLE,
 } from "@/lib/media";
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { useFocusEffect, useRouter } from "expo-router";
 import React, { useCallback, useMemo, useState } from "react";
 import {

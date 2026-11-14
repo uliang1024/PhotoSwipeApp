@@ -1,4 +1,4 @@
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { Platform } from "react-native";
 
 export const ORGANIZED_ALBUM_TITLE = "已整理";

@@ -1,6 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Image } from "expo-image";
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import React, { useState } from "react";
 import {
     Alert,
@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
     padding: 2,
   },
   selectedOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: Colors.scrimLight,
     justifyContent: "center",
     alignItems: "center",

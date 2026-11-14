@@ -1,7 +1,7 @@
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import { Platform } from "react-native";
 
-jest.mock("expo-media-library", () => ({
+jest.mock("expo-media-library/legacy", () => ({
   requestPermissionsAsync: jest.fn(async () => ({ status: "granted" })),
   getAlbumsAsync: jest.fn(async () => []),
   deleteAssetsAsync: jest.fn(),
@@ -29,7 +29,7 @@ beforeEach(async () => {
   jest.isolateModules(() => {
     /* eslint-disable @typescript-eslint/no-require-imports */
     store = require("../library-store");
-    deleteMock = (require("expo-media-library") as typeof MediaLibrary)
+    deleteMock = (require("expo-media-library/legacy") as typeof MediaLibrary)
       .deleteAssetsAsync as jest.Mock;
   });
   await store.refreshLibrary();

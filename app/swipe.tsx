@@ -6,7 +6,7 @@ import { ThemedView } from "@/components/themed-view";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
-import * as MediaLibrary from "expo-media-library";
+import * as MediaLibrary from "expo-media-library/legacy";
 import {
   usePreventRemove,
   type NavigationAction,
@@ -32,7 +32,13 @@ import {
   type SwipeAction,
 } from "@/lib/swipe-history";
 import { useVideoPlayer, VideoView } from "expo-video";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -313,6 +319,42 @@ const SessionSummary = ({
 };
 
 // --- 主螢幕 ---
+// 依分類挑出這次要整理的照片（排除已整理）
+async function loadCategoryPhotos(
+  type?: string,
+  albumId?: string,
+  monthId?: string,
+): Promise<MediaLibrary.Asset[]> {
+  // 一般情況直接命中首頁載好的快取，不重掃
+  await refreshLibrary();
+  const { assets, organizedIds, screenshotIds } = getLibrarySnapshot();
+  // asset 本身不帶所屬相簿，相簿模式只能另外抓該相簿
+  const source =
+    type === "album" && albumId
+      ? await fetchAllAssets({ album: albumId, sortBy: ["creationTime"] })
+      : assets;
+
+  const filtered = source.filter((asset) => {
+    if (organizedIds.has(asset.id)) return false;
+    switch (type) {
+      case "weekly":
+        return isWithinLastWeek(asset.creationTime);
+      case "month":
+        return monthKey(asset.creationTime) === monthId;
+      case "unorganized_screenshot":
+        return screenshotIds.has(asset.id);
+      case "unorganized_video":
+        return asset.mediaType === "video";
+      default:
+        return true;
+    }
+  });
+
+  if (type !== "burst") return filtered;
+  const burstIds = new Set(findBursts(filtered).flat());
+  return filtered.filter((a) => burstIds.has(a.id));
+}
+
 export default function SwipeScreen() {
   const router = useRouter();
   const navigation = useNavigation();
@@ -377,12 +419,10 @@ export default function SwipeScreen() {
       transform: [{ translateY }],
     };
   });
-  // 照片被移走後，索引不能超出範圍
-  useEffect(() => {
-    if (photos.length > 0 && currentIndex >= photos.length) {
-      setCurrentIndex(photos.length - 1);
-    }
-  }, [photos.length, currentIndex]);
+  // 照片被移走後，索引不能超出範圍（render 中直接校正，不用 effect 多繞一輪）
+  if (photos.length > 0 && currentIndex >= photos.length) {
+    setCurrentIndex(photos.length - 1);
+  }
 
   // 跳轉至特定照片
   const handleJumpToPhoto = (index: number) => {
@@ -390,54 +430,19 @@ export default function SwipeScreen() {
     flatListRef.current?.scrollToIndex({ index, animated: false });
     // 縮回由 PhotoGridModal 選完後呼叫的 onClose 處理
   };
-  const loadCategoryPhotos = useCallback(async () => {
-    setLoading(true);
-    try {
-      // 一般情況直接命中首頁載好的快取，不重掃
-      await refreshLibrary();
-      const { assets, organizedIds, screenshotIds } = getLibrarySnapshot();
-      // asset 本身不帶所屬相簿，相簿模式只能另外抓該相簿
-      const source =
-        type === "album" && albumId
-          ? await fetchAllAssets({ album: albumId, sortBy: ["creationTime"] })
-          : assets;
-
-      const filtered = source.filter((asset) => {
-        if (organizedIds.has(asset.id)) return false;
-        switch (type) {
-          case "weekly":
-            return isWithinLastWeek(asset.creationTime);
-          case "month":
-            return monthKey(asset.creationTime) === monthId;
-          case "unorganized_screenshot":
-            return screenshotIds.has(asset.id);
-          case "unorganized_video":
-            return asset.mediaType === "video";
-          default:
-            return true;
-        }
-      });
-
-      if (type === "burst") {
-        const burstIds = new Set(findBursts(filtered).flat());
-        setPhotos(filtered.filter((a) => burstIds.has(a.id)));
-      } else {
-        setPhotos(filtered);
-      }
-    } catch (error) {
-      console.error("載入失敗:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [type, albumId, monthId]);
-
+  // 只在進頁面時跑一次（loading 初始就是 true）
   useEffect(() => {
-    loadCategoryPhotos();
-  }, [loadCategoryPhotos]);
+    loadCategoryPhotos(type, albumId, monthId)
+      .then(setPhotos)
+      .catch((error) => console.error("載入失敗:", error))
+      .finally(() => setLoading(false));
+  }, [type, albumId, monthId]);
 
   // 卡片飛走動畫結束才 onSwipe，期間可能已被按鈕 stage 過；用 ref 拿最新清單去重
   const photosRef = React.useRef(photos);
-  photosRef.current = photos;
+  useLayoutEffect(() => {
+    photosRef.current = photos;
+  }, [photos]);
 
   // 核心：照片飛走後從主列表移除，放進對應的暫存區，整批記成一筆歷史
   const stage = useCallback(

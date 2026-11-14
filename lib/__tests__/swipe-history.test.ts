@@ -1,4 +1,4 @@
-import type * as MediaLibrary from "expo-media-library";
+import type * as MediaLibrary from "expo-media-library/legacy";
 import {
   findUndo,
   planStage,
