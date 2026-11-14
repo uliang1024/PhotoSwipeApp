@@ -7,7 +7,10 @@ import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library";
-import { usePreventRemove } from "@react-navigation/native";
+import {
+  usePreventRemove,
+  type NavigationAction,
+} from "@react-navigation/native";
 import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
 import {
   deleteAssets,
@@ -426,14 +429,20 @@ export default function SwipeScreen() {
     loadCategoryPhotos();
   }, [loadCategoryPhotos]);
 
+  // 卡片飛走動畫結束才 onSwipe，期間可能已被按鈕 stage 過；用 ref 拿最新清單去重
+  const photosRef = React.useRef(photos);
+  photosRef.current = photos;
+
   // 核心：照片飛走後從主列表移除，放進對應的暫存區，整批記成一筆歷史
   const stage = useCallback(
     (plan: Map<string, SwipeAction>) => {
-      const items = photos.flatMap((asset, index) => {
+      const items = photosRef.current.flatMap((asset, index) => {
         const action = plan.get(asset.id);
         return action ? [{ asset, index, action }] : [];
       });
       if (items.length === 0) return;
+      // 同一輪 render 前再次呼叫也不會重複 stage
+      photosRef.current = photosRef.current.filter((p) => !plan.has(p.id));
       const assetsOf = (action: SwipeAction) =>
         items.filter((i) => i.action === action).map((i) => i.asset);
       const keeps = assetsOf("keep");
@@ -447,7 +456,7 @@ export default function SwipeScreen() {
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       }
     },
-    [photos],
+    [],
   );
 
   const stageAssets = useCallback(
@@ -547,15 +556,29 @@ export default function SwipeScreen() {
   // 離開時寫入暫存的保留；垃圾桶還有東西才詢問，避免待刪清單默默消失
   const hasPending =
     pendingKeepAssets.length > 0 || pendingDeleteAssets.length > 0;
-  usePreventRemove(hasPending, ({ data }) => {
+  // 寫入完先關掉攔截，等重繪後再 dispatch，不然會被舊狀態再攔一次
+  const [leaveAction, setLeaveAction] = useState<NavigationAction | null>(
+    null,
+  );
+  const leavingRef = React.useRef(false);
+  useEffect(() => {
+    if (leaveAction) navigation.dispatch(leaveAction);
+  }, [leaveAction, navigation]);
+  usePreventRemove(hasPending && !leaveAction, ({ data }) => {
     const leave = async (withDelete: boolean) => {
-      if (!(await commitKeeps())) return;
-      if (
-        withDelete &&
-        !(await confirmFinalDelete(pendingDeleteAssets.map((a) => a.id)))
-      )
-        return;
-      navigation.dispatch(data.action);
+      if (leavingRef.current) return;
+      leavingRef.current = true;
+      try {
+        if (!(await commitKeeps())) return;
+        if (
+          withDelete &&
+          !(await confirmFinalDelete(pendingDeleteAssets.map((a) => a.id)))
+        )
+          return;
+        setLeaveAction(data.action);
+      } finally {
+        leavingRef.current = false;
+      }
     };
 
     if (pendingDeleteAssets.length === 0) {
@@ -599,9 +622,10 @@ export default function SwipeScreen() {
     if (pendingDeleteAssets.length === ids.length) setIsTrashVisible(false);
   };
 
-  const onMomentumScrollEnd = (e: any) => {
+  // 捲動中就更新（過半即換張），不等 momentum 結束；無 momentum 的拖放也會觸發
+  const onScroll = (e: any) => {
     const index = Math.round(e.nativeEvent.contentOffset.x / SCREEN_WIDTH);
-    setCurrentIndex(index);
+    setCurrentIndex((prev) => (prev === index ? prev : index));
   };
 
   if (loading)
@@ -623,7 +647,8 @@ export default function SwipeScreen() {
               pagingEnabled
               showsHorizontalScrollIndicator={false}
               keyExtractor={(item) => item.id}
-              onMomentumScrollEnd={onMomentumScrollEnd}
+              onScroll={onScroll}
+              scrollEventThrottle={16}
               renderItem={({ item, index }) => (
                 <SwipeableCard
                   item={item}
