@@ -29,6 +29,7 @@ export default function RootLayout() {
 
           {/* 2. Swipe 頁面也要隱藏 Header，因為我們在頁面裡自訂了 */}
           <Stack.Screen name="swipe" options={{ headerShown: false }} />
+          <Stack.Screen name="similar-proto" options={{ headerShown: false }} />
         </Stack>
         <StatusBar style="light" />
       </ThemeProvider>

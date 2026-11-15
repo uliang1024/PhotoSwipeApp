@@ -293,6 +293,13 @@ export default function OrganizeScreen() {
                   onPress={() =>
                     openSwipe({ title, type: "month", monthId: item.monthId })
                   }
+                  // 原型入口：長按月份進相似照片分組
+                  onLongPress={() =>
+                    router.push({
+                      pathname: "/similar-proto",
+                      params: { monthId: item.monthId },
+                    })
+                  }
                 >
                   <View style={styles.rollLabel}>
                     <ThemedText style={styles.rollDate}>{title}</ThemedText>
