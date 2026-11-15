@@ -132,15 +132,15 @@ const SwipeableCard = ({
       flying.value = true;
       heartScale.value = withSequence(
         withSpring(1, { damping: 8 }),
-        withDelay(150, withTiming(0, { duration: 150 })),
+        withDelay(500, withTiming(0, { duration: 150 })),
       );
       translateY.value = withDelay(
-        350,
+        700,
         withTiming(SCREEN_HEIGHT, { duration: 250 }, () => {
           runOnJS(onFavorite)(item.id);
         }),
       );
-      opacity.value = withDelay(350, withTiming(0, { duration: 200 }));
+      opacity.value = withDelay(700, withTiming(0, { duration: 200 }));
       runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
     });
 
@@ -256,6 +256,12 @@ const SwipeableCard = ({
         </Animated.View>
         <Animated.View pointerEvents="none" style={[styles.heart, heartStyle]}>
           <Ionicons name="heart" size={110} color={Colors.keep} />
+          {/* 跟下滑保留區分：雙擊多了加入個人收藏 */}
+          <View style={styles.heartLabel}>
+            <ThemedText style={styles.heartLabelText}>
+              已加入個人收藏
+            </ThemedText>
+          </View>
         </Animated.View>
       </Animated.View>
     </GestureDetector>
@@ -1140,6 +1146,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  heartLabel: {
+    marginTop: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: Colors.scrimStrong,
+  },
+  heartLabelText: { color: Colors.text, fontSize: 15, fontWeight: "600" },
   swipeHintText: { color: Colors.text, fontSize: 18, fontWeight: "bold" },
   center: {
     flex: 1,
