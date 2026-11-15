@@ -8,10 +8,12 @@ import * as Haptics from "expo-haptics";
 import { Image } from "expo-image";
 import * as MediaLibrary from "expo-media-library/legacy";
 import {
+  useLocalSearchParams,
+  useNavigation,
   usePreventRemove,
+  useRouter,
   type NavigationAction,
-} from "@react-navigation/native";
-import { useLocalSearchParams, useNavigation, useRouter } from "expo-router";
+} from "expo-router";
 import {
   deleteAssets,
   getLibrarySnapshot,
