@@ -122,6 +122,13 @@ export async function keepAssets(assetIds: string[]) {
   if (Platform.OS === "android") stale = true;
 }
 
+// iOS 系統「個人收藏」；只在 iOS 有效。自己改的不觸發重掃
+export async function setFavorite(id: string, isFavorite: boolean) {
+  ignoreOwnChanges();
+  await MediaLibrary.setAssetFavoriteAsync(id, isFavorite);
+  ignoreOwnChanges();
+}
+
 // iOS 使用者在系統確認框按取消是 reject（NSUserCancelledError／PHPhotosErrorUserCancelled，都是 3072）
 const USER_CANCELLED = /3072/;
 

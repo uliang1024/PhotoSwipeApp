@@ -19,6 +19,7 @@ import {
   getLibrarySnapshot,
   keepAssets,
   refreshLibrary,
+  setFavorite,
 } from "@/lib/library-store";
 import {
   fetchAllAssets,
@@ -46,6 +47,7 @@ import {
   Alert,
   Dimensions,
   FlatList,
+  Platform,
   StyleSheet,
   TouchableOpacity,
   View,
@@ -59,6 +61,8 @@ import Animated, {
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withDelay,
+  withSequence,
   withSpring,
   withTiming,
 } from "react-native-reanimated";
@@ -97,27 +101,57 @@ const VideoCard = ({ uri, isActive }: { uri: string; isActive: boolean }) => {
 const SWIPE_DISTANCE = 120;
 const SWIPE_VELOCITY = 500;
 
-// --- 子組件：SwipeableCard（上滑刪除、下滑保留）---
+// iOS 才能寫入系統「個人收藏」
+const CAN_FAVORITE = Platform.OS === "ios";
+
+// --- 子組件：SwipeableCard（上滑刪除、下滑保留、雙擊加最愛並保留）---
 const SwipeableCard = ({
   item,
   onSwipe,
+  onFavorite,
   isActive,
   height,
 }: {
   item: MediaLibrary.Asset;
   onSwipe: (id: string, action: SwipeAction) => void;
+  onFavorite: (id: string) => void;
   isActive: boolean;
   height: number;
 }) => {
   const translateY = useSharedValue(0);
   const opacity = useSharedValue(1);
+  const heartScale = useSharedValue(0);
+  const flying = useSharedValue(false);
 
-  const gesture = Gesture.Pan()
+  // 愛心彈出後卡片往下飛走（同保留）
+  const doubleTap = Gesture.Tap()
+    .numberOfTaps(2)
+    .enabled(CAN_FAVORITE)
+    .onEnd(() => {
+      if (flying.value) return;
+      flying.value = true;
+      heartScale.value = withSequence(
+        withSpring(1, { damping: 8 }),
+        withDelay(150, withTiming(0, { duration: 150 })),
+      );
+      translateY.value = withDelay(
+        350,
+        withTiming(SCREEN_HEIGHT, { duration: 250 }, () => {
+          runOnJS(onFavorite)(item.id);
+        }),
+      );
+      opacity.value = withDelay(350, withTiming(0, { duration: 200 }));
+      runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
+    });
+
+  const pan = Gesture.Pan()
     .activeOffsetY([-10, 10])
     .onUpdate((event) => {
+      if (flying.value) return;
       translateY.value = event.translationY;
     })
     .onEnd((event) => {
+      if (flying.value) return;
       const { translationY: dy, velocityY: vy } = event;
       const up = dy < -SWIPE_DISTANCE || (vy < -SWIPE_VELOCITY && dy < 0);
       const down = dy > SWIPE_DISTANCE || (vy > SWIPE_VELOCITY && dy > 0);
@@ -126,6 +160,7 @@ const SwipeableCard = ({
         return;
       }
       const action: SwipeAction = up ? "delete" : "keep";
+      flying.value = true;
       translateY.value = withTiming(
         up ? -SCREEN_HEIGHT : SCREEN_HEIGHT,
         { duration: 250 },
@@ -136,6 +171,13 @@ const SwipeableCard = ({
       opacity.value = withTiming(0, { duration: 200 });
       runOnJS(Haptics.impactAsync)(Haptics.ImpactFeedbackStyle.Medium);
     });
+
+  const gesture = Gesture.Race(pan, doubleTap);
+
+  const heartStyle = useAnimatedStyle(() => ({
+    opacity: heartScale.value,
+    transform: [{ scale: heartScale.value }],
+  }));
 
   const deleteHintStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
@@ -211,6 +253,9 @@ const SwipeableCard = ({
           <ThemedText style={[styles.swipeHintText, styles.keepHintText]}>
             保留
           </ThemedText>
+        </Animated.View>
+        <Animated.View pointerEvents="none" style={[styles.heart, heartStyle]}>
+          <Ionicons name="heart" size={110} color={Colors.keep} />
         </Animated.View>
       </Animated.View>
     </GestureDetector>
@@ -511,6 +556,22 @@ export default function SwipeScreen() {
     [stageAssets],
   );
 
+  // 雙擊：加入 iOS 個人收藏＋保留；復原時要把最愛拿掉
+  // （畫面上的照片都不在個人收藏，所以復原取消最愛不會誤刪原本的最愛）
+  const favoritedIds = React.useRef(new Set<string>());
+  const handleFavorite = useCallback(
+    (id: string) => {
+      favoritedIds.current.add(id);
+      stageAssets("keep", [id]);
+      setFavorite(id, true).catch((error) => {
+        console.error("加入最愛失敗:", error);
+        favoritedIds.current.delete(id);
+        Alert.alert("加入最愛失敗", "照片仍會保留。");
+      });
+    },
+    [stageAssets],
+  );
+
   // 復原最近一次仍有效的操作（已從垃圾桶恢復或已真正刪除的會跳過）
   const pendingIds = useMemo(
     () => ({
@@ -531,6 +592,12 @@ export default function SwipeScreen() {
     }
     const { at, items } = undoTarget;
     const ids = new Set(items.map((i) => i.asset.id));
+    for (const id of ids) {
+      if (!favoritedIds.current.delete(id)) continue;
+      setFavorite(id, false).catch((error) =>
+        console.error("取消最愛失敗:", error),
+      );
+    }
     setPendingKeepAssets((prev) => prev.filter((a) => !ids.has(a.id)));
     setPendingDeleteAssets((prev) => prev.filter((a) => !ids.has(a.id)));
     setHistory(history.slice(0, at));
@@ -692,6 +759,7 @@ export default function SwipeScreen() {
                 <SwipeableCard
                   item={item}
                   onSwipe={handleSwipe}
+                  onFavorite={handleFavorite}
                   // 關鍵修正：傳入 isActive 讓子組件知道現在輪到哪張照片/影片
                   isActive={currentIndex === index}
                   height={cardHeight}
@@ -744,6 +812,9 @@ export default function SwipeScreen() {
                       "・左右滑動切換照片",
                       "・往上滑或按「刪除」放入垃圾桶",
                       "・往下滑或按「保留」，離開時移到「已整理」相簿，之後不會再出現",
+                      ...(CAN_FAVORITE
+                        ? ["・雙擊照片加入「個人收藏」並保留"]
+                        : []),
                       "・按「復原」可撤回上一步",
                       "・點上方標題可開啟網格跳轉或批次選取",
                       "・右上角垃圾桶可恢復或真正刪除",
@@ -1064,6 +1135,11 @@ const styles = StyleSheet.create({
   deleteHint: { backgroundColor: Colors.danger },
   keepHint: { backgroundColor: Colors.keep },
   keepHintText: { color: Colors.onKeep },
+  heart: {
+    ...StyleSheet.absoluteFill,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   swipeHintText: { color: Colors.text, fontSize: 18, fontWeight: "bold" },
   center: {
     flex: 1,
